@@ -160,40 +160,41 @@ function marketOpen() {
 }
 function tickClock() {
   const now = new Date();
-  el('clock').textContent = now.toLocaleString('en-US', {
+  const open = marketOpen();
+  const t = now.toLocaleString('en-US', {
     weekday: 'short', month: 'short', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
-  const open = marketOpen();
-  const s = el('mkt-status');
-  s.classList.toggle('open', open);
-  s.classList.toggle('closed', !open);
-  el('mkt-status-text').textContent = open ? 'US OPEN' : 'US CLOSED';
+  el('status-right').innerHTML = `<span class="${open ? 'pos' : 'neg'}">● ${open ? 'US MKT OPEN' : 'US MKT CLOSED'}</span> &nbsp; ${esc(t)} ET`;
   if (state.view === 'LAUNCH') renderLpClocks();
 }
 
 /* ------------------------------------------------------- view render */
 
 function setActiveTabs(view) {
-  document.querySelectorAll('.top-tab').forEach((t) =>
-    t.classList.toggle('active', t.dataset.cmd === view));
+  if (view) setChrome('—', view);
 }
 
 function secBar(title, right = '', extra = '') {
   return `<div class="sec-bar"><span>${title}</span><span class="right">${right}</span>${extra}</div>`;
 }
 
-// The iconic red Bloomberg function title bar with numbered action buttons.
-function fnBar(name, code, right = '') {
+// Full Bloomberg action row: yellow security box · red action buttons ·
+// yellow control fields · red function-title panel.
+function fnBar(name, code, sec = '', controls = '') {
   return `<div class="fn-bar">
+    ${sec ? `<span class="fn-secbox">${esc(sec)}</span>` : ''}
     <span class="fn-actions">
-      <button class="fn-act" data-act="actions"><span class="n">96)</span>ACTIONS</button>
-      <button class="fn-act" data-act="export"><span class="n">97)</span>EXPORT</button>
-      <button class="fn-act" data-act="settings"><span class="n">98)</span>SETTINGS</button>
+      <button class="fn-act" data-act="actions"><span class="n">96)</span>Actions ▾</button>
+      <button class="fn-act" data-act="export"><span class="n">97)</span>Export ▾</button>
+      <button class="fn-act" data-act="settings"><span class="n">98)</span>Settings</button>
     </span>
-    <span class="fn-name">${esc(name)}<span class="code">${esc(code)}${right ? ' · ' + esc(right) : ''}</span></span>
+    ${controls}
+    <span class="fn-spacer"></span>
+    <span class="fn-name">${esc(name)}<span class="code">${esc(code)}</span></span>
   </div>`;
 }
+const eqBox = () => `${state.symbol} US Equity`;
 
 // EXPORT (97): download the first data table on screen as CSV — a real Bloomberg action.
 function exportCSV() {
@@ -230,26 +231,47 @@ function renderSecHeader(q) {
   el('sec-header').classList.remove('hidden');
   el('sec-symbol').textContent = q.symbol;
   el('sec-name').textContent = q.name || '';
-  el('sec-exch').textContent = [q.exchange, q.currency].filter(Boolean).join(' · ');
   const p = el('sec-price');
   p.textContent = fmtPrice(q.price);
   p.className = chgClass(q.change);
   const c = el('sec-change');
   c.textContent = fmtChange(q.change, q.changePct);
   c.className = chgClass(q.change);
-  el('sec-time').textContent = q.marketTime
-    ? `As of ${new Date(q.marketTime * 1000).toLocaleString()} ${q.timezone} · Prev ${fmtPrice(q.prevClose)} · O ${fmtPrice(q.open)} · H ${fmtPrice(q.dayHigh)} · L ${fmtPrice(q.dayLow)} · Vol ${fmtBig(q.volume)}`
-    : '';
+  el('sec-detail').textContent =
+    `${[q.exchange, q.currency].filter(Boolean).join(' · ')}`
+    + (q.marketTime ? ` · As of ${new Date(q.marketTime * 1000).toLocaleString()} ${q.timezone}` : '')
+    + ` · Prev ${fmtPrice(q.prevClose)} · O ${fmtPrice(q.open)} · H ${fmtPrice(q.dayHigh)} · L ${fmtPrice(q.dayLow)} · Vol ${fmtBig(q.volume)}`;
   el('sec-funcs').innerHTML = SEC_FUNCS.map(([code, label], i) =>
-    `<button class="sec-func" data-func="${code}"><span class="n">${i + 1})</span>${code} <span class="muted" style="font-weight:400">${label}</span></button>`).join('');
+    `<button class="sec-func" data-func="${code}"><span class="n">${i + 1})</span>${code} <span class="muted">${label}</span></button>`).join('');
   el('sec-funcs').querySelectorAll('.sec-func').forEach((b) =>
     b.addEventListener('click', () => runFunc(b.dataset.func)));
+}
+
+/* app-chrome (top toolbar) security/function context */
+function setChrome(sec, fn) {
+  el('chr-sec').innerHTML = `${esc(sec || '—')} <b class="tri">▾</b>`;
+  el('chr-sec').dataset.cmd = sec && state.symbol ? state.symbol : '';
+  el('chr-fn').innerHTML = `${esc(fn || 'HOME')} <b class="tri">▾</b>`;
+}
+
+/* bottom suggested-functions status strip */
+function setSuggest(html) {
+  const s = el('suggest');
+  if (!html) { s.classList.remove('show'); s.innerHTML = ''; return; }
+  s.innerHTML = `<span class="nav"><button>«</button><button>‹</button><button>›</button><button>»</button></span>${html}`;
+  s.classList.add('show');
 }
 
 function markFunc(code) {
   state.func = code;
   document.querySelectorAll('.sec-func').forEach((b) =>
     b.classList.toggle('active', b.dataset.func === code));
+  if (code && state.symbol) setChrome(`${state.symbol} US Equity`, code);
+  if (code && state.symbol && ['GP', 'GIP', 'DES', 'FA', 'ERN', 'CN'].includes(code)) {
+    setSuggest('<span class="sg">Suggested Functions &nbsp; <b>DES</b> Description &nbsp;·&nbsp; <b>GP</b> Graph &nbsp;·&nbsp; <b>FA</b> Fundamentals &nbsp;·&nbsp; <b>ERN</b> Earnings &nbsp;·&nbsp; <b>CN</b> News</span>');
+  } else {
+    setSuggest('');
+  }
 }
 
 function runFunc(code) {
@@ -276,7 +298,7 @@ async function showChart(range) {
   setActiveTabs(null);
   el('view').innerHTML = `
     <div id="screen-chart">
-      ${fnBar(state.range === '1d' ? 'INTRADAY PRICE GRAPH' : 'PRICE GRAPH', state.range === '1d' ? 'GIP' : 'GP', state.symbol)}
+      ${fnBar(state.range === '1d' ? 'INTRADAY PRICE GRAPH' : 'PRICE GRAPH', state.range === '1d' ? 'GIP' : 'GP', eqBox())}
       <div id="chart-toolbar">
         <span class="tb-label">RANGE</span>
         ${RANGE_LABELS.map(([r, l]) => `<button class="tb-btn rbtn" data-range="${r}">${l}</button>`).join('')}
@@ -428,7 +450,7 @@ function drawChart() {
 async function showDES() {
   if (!state.symbol) { msg('Load a security first', true); return; }
   setActiveTabs(null);
-  el('view').innerHTML = fnBar('SECURITY DESCRIPTION', 'DES', state.symbol) +
+  el('view').innerHTML = fnBar('SECURITY DESCRIPTION', 'DES', eqBox()) +
     `<div class="sec-body"><div class="loading">Loading…</div></div>`;
   const body = el('view').querySelector('.sec-body');
   try {
@@ -486,12 +508,15 @@ function showFA() {
 }
 
 function renderFAShell() {
-  el('view').innerHTML = fnBar('FINANCIAL ANALYSIS', 'FA', state.symbol)
+  const periods = faCache.fin ? faCache.fin.years.length : 4;
+  const controls = `<span class="fn-ctrl"><b>Periods</b> ${periods} Annuals ▾</span><span class="fn-ctrl"><b>Cur</b> USD ▾</span>`;
+  el('view').innerHTML = fnBar('FINANCIAL ANALYSIS', 'FA', eqBox(), controls)
     + `<div class="fa-tabs">${FA_TABS.map(([k, l], i) =>
         `<button class="fa-tab ${k === faCache.tab ? 'active' : ''}" data-tab="${k}"><span class="n">${i + 1})</span>${l}</button>`).join('')}</div>`
     + `<div id="fa-body"><div class="loading">Loading…</div></div>`;
   el('view').querySelectorAll('.fa-tab').forEach((b) =>
     b.addEventListener('click', () => { faCache.tab = b.dataset.tab; renderFAShell(); loadFATab(); }));
+  setSuggest('<span class="sg">Suggested Functions &nbsp; <b>FA</b> Financial Analysis &nbsp;·&nbsp; <b>EVTS</b> Company Events &nbsp;·&nbsp; <b>MODL</b> Earnings Model &nbsp;·&nbsp; <b>ERN</b> Earnings &nbsp;·&nbsp; <b>DES</b> Description</span>');
 }
 
 async function loadFATab() {
@@ -517,20 +542,23 @@ function fmtFin(v, label) {
   return fmtBig(v);
 }
 
-function statementTable(years, rows, unit) {
-  return `<div class="tbl-wrap"><table class="fin">
-    <tr><th class="fin-unit">${esc(unit)}</th>${years.map((y) => `<th class="num">FY${esc(y)}</th>`).join('')}</tr>
-    ${rows.map((r) => `<tr>
-      <td class="fin-label">${GLYPH}<span>${esc(r.label)}</span></td>
-      ${r.values.map((v) => `<td class="num ${v < 0 ? 'neg' : ''}">${r.fmt ? r.fmt(v) : fmtFin(v, r.label)}</td>`).join('')}
-    </tr>`).join('')}
-  </table></div>`;
+function statementTable(years, rows, unit, groupLabel) {
+  const head = `<tr><th class="fin-unit">${esc(unit)}</th>${years.map((y) => `<th class="num">${esc(y)} Y</th>`).join('')}</tr>`
+    + `<tr><th class="fin-unit muted" style="font-size:10px">12 Months Ending</th>${years.map((y) => `<th class="num muted" style="font-size:10px">12/31/${esc(y)}</th>`).join('')}</tr>`;
+  const grp = groupLabel ? `<tr class="grp"><td class="fin-label">${esc(groupLabel)}</td>${years.map(() => '<td></td>').join('')}</tr>` : '';
+  const body = rows.map((r) => `<tr>
+    <td class="fin-label indent">${GLYPH}<span>${esc(r.label)}</span></td>
+    ${r.values.map((v) => (v == null
+      ? '<td class="dash">–</td>'
+      : `<td class="num">${r.fmt ? r.fmt(v) : fmtFin(v, r.label)}</td>`)).join('')}
+  </tr>`).join('');
+  return `<div class="tbl-wrap"><table class="fin">${head}${grp}${body}</table></div>`;
 }
 
 function renderStatement(fin, which, body) {
   if (!fin[which] || !fin[which].length) { body.innerHTML = '<div class="muted" style="padding:12px">No data for this statement.</div>'; return; }
   const title = { income: 'INCOME STATEMENT', balance: 'BALANCE SHEET', cashflow: 'STATEMENT OF CASH FLOWS' }[which];
-  body.innerHTML = secBar(title, `${fin.symbol} · annual`) + statementTable(fin.years, fin[which], 'Reported currency · scaled');
+  body.innerHTML = statementTable(fin.years, fin[which], 'In Millions of USD', title);
 }
 
 function renderFARatios(fin, body) {
@@ -554,7 +582,7 @@ function renderFARatios(fin, body) {
     ratioRow('Revenue Growth', (i) => (rev[i + 1] ? ((rev[i] - rev[i + 1]) / Math.abs(rev[i + 1])) * 100 : null), asPct),
     ratioRow('Net Income Growth', (i) => (ni[i + 1] ? ((ni[i] - ni[i + 1]) / Math.abs(ni[i + 1])) * 100 : null), asPct),
   ];
-  body.innerHTML = secBar('KEY RATIOS', `${fin.symbol} · annual`) + statementTable(fin.years, rows, 'Derived ratios');
+  body.innerHTML = statementTable(fin.years, rows, 'Derived Ratios', 'KEY RATIOS');
 }
 
 function renderFAOverview(s, body) {
@@ -633,7 +661,7 @@ function renderFAOverview(s, body) {
 async function showERN() {
   if (!state.symbol) { msg('Load a security first', true); return; }
   setActiveTabs(null);
-  el('view').innerHTML = fnBar('EARNINGS', 'ERN', state.symbol) +
+  el('view').innerHTML = fnBar('EARNINGS', 'ERN', eqBox()) +
     `<div class="sec-body"><div class="loading">Loading earnings…</div></div>`;
   const body = el('view').querySelector('.sec-body');
   try {
@@ -683,7 +711,7 @@ function newsHTML(items, limit = 40) {
 async function showNews() {
   if (!state.symbol) { msg('Load a security first', true); return; }
   setActiveTabs(null);
-  el('view').innerHTML = fnBar('COMPANY NEWS', 'CN', state.symbol) + `<div class="sec-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('COMPANY NEWS', 'CN', eqBox()) + `<div class="sec-body"><div class="loading">Loading…</div></div>`;
   const body = el('view').querySelector('.sec-body');
   try {
     const data = await api(`/api/news?symbol=${encodeURIComponent(state.symbol)}`);
@@ -693,7 +721,7 @@ async function showNews() {
 
 async function showTopNews() {
   state.view = 'TOP'; setActiveTabs('TOP'); markFunc(null);
-  el('view').innerHTML = fnBar('TOP MARKET NEWS', 'TOP', 'Live') + `<div class="sec-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('TOP MARKET NEWS', 'TOP', 'TOP News') + `<div class="sec-body"><div class="loading">Loading…</div></div>`;
   const body = el('view').querySelector('.sec-body');
   try {
     const data = await api('/api/news?symbol=SPY');
@@ -741,7 +769,7 @@ function wireRows(container) {
 
 async function showWEI() {
   state.view = 'WEI'; setActiveTabs('WEI'); markFunc(null);
-  el('view').innerHTML = fnBar('WORLD EQUITY INDICES', 'WEI', 'Live') + `<div id="wei-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('WORLD EQUITY INDICES', 'WEI', 'WEI Monitor') + `<div id="wei-body"><div class="loading">Loading…</div></div>`;
   try {
     const all = Object.values(WORLD).flat().map((r) => r[0]);
     const byName = await quoteBoard(all);
@@ -755,7 +783,7 @@ async function showWEI() {
 
 async function showCommodities() {
   state.view = 'CMDTY'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = fnBar('COMMODITIES', 'CMDTY', 'Live') + `<div id="cmdty-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('COMMODITIES', 'CMDTY', 'CMDTY Monitor') + `<div id="cmdty-body"><div class="loading">Loading…</div></div>`;
   try {
     const all = Object.values(COMMODITIES).flat().map((r) => r[0]);
     const byName = await quoteBoard(all);
@@ -769,7 +797,7 @@ async function showCommodities() {
 
 async function showRates() {
   state.view = 'GOVT'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = fnBar('US TREASURY YIELDS & FUTURES', 'GOVT', 'Live') + `<div id="rate-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('US TREASURY YIELDS & FUTURES', 'GOVT', 'GOVT Monitor') + `<div id="rate-body"><div class="loading">Loading…</div></div>`;
   try {
     const byName = await quoteBoard([...RATES, ...RATE_FUT].map((r) => r[0]));
     el('rate-body').innerHTML = `<div class="grid-2">
@@ -788,7 +816,7 @@ async function showMovers(type) {
   state.view = 'MOST'; setActiveTabs('MOST'); markFunc(null);
   const tabs = `<span class="tabs">${[['gainers', 'GAINERS'], ['losers', 'LOSERS'], ['actives', 'MOST ACTIVE']]
     .map(([t, l]) => `<button class="tab mv-tab ${t === moversType ? 'active' : ''}" data-mv="${t}">${l}</button>`).join('')}</span>`;
-  el('view').innerHTML = fnBar('US MARKET MOVERS', 'MOST') + secBar('MOVERS', '', tabs) + `<div id="mv-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('US MARKET MOVERS', 'MOST', 'MOST Movers') + secBar('MOVERS', '', tabs) + `<div id="mv-body"><div class="loading">Loading…</div></div>`;
   el('view').querySelectorAll('.mv-tab').forEach((b) => b.addEventListener('click', () => showMovers(b.dataset.mv)));
   try {
     const data = await api(`/api/movers?type=${moversType}`);
@@ -811,7 +839,7 @@ async function showMovers(type) {
 
 async function showFX() {
   state.view = 'FX'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = fnBar('CURRENCY RATES (ECB REFERENCE)', 'FX') + `<div id="fx-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('CURRENCY RATES (ECB REFERENCE)', 'FX', 'FX Monitor') + `<div id="fx-body"><div class="loading">Loading…</div></div>`;
   try {
     const data = await api('/api/fx?base=USD');
     el('fx-body').innerHTML = `
@@ -834,7 +862,7 @@ async function showFX() {
 
 async function showCrypto() {
   state.view = 'CRYP'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = fnBar('CRYPTOCURRENCY MARKET', 'CRYP', 'CoinGecko') + `<div id="cryp-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('CRYPTOCURRENCY MARKET', 'CRYP', 'CRYP Monitor') + `<div id="cryp-body"><div class="loading">Loading…</div></div>`;
   try {
     const coins = await api('/api/crypto');
     el('cryp-body').innerHTML = `<div class="tbl-wrap"><table class="data">
@@ -855,7 +883,7 @@ async function showCrypto() {
 
 async function showWatchlist() {
   state.view = 'W'; setActiveTabs('W'); markFunc(null);
-  el('view').innerHTML = fnBar('WATCHLIST / PORTFOLIO', 'W', 'W ADD / DEL <SYM>') + `<div id="wl-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('WATCHLIST / PORTFOLIO', 'W', 'W Portfolio') + `<div id="wl-body"><div class="loading">Loading…</div></div>`;
   if (!state.watchlist.length) { el('wl-body').innerHTML = '<div class="muted" style="padding:12px">Watchlist empty. Add with <span class="hl">W ADD NVDA</span>.</div>'; return; }
   try {
     const quotes = await api(`/api/quotes?symbols=${encodeURIComponent(state.watchlist.join(','))}`);
@@ -886,7 +914,7 @@ async function showWatchlist() {
 
 async function showSearch(query) {
   state.view = 'SECF'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = fnBar('SECURITY FINDER', 'SECF', query) + `<div id="sf-body"><div class="loading">Searching…</div></div>`;
+  el('view').innerHTML = fnBar('SECURITY FINDER', 'SECF', 'SECF Search') + `<div id="sf-body"><div class="loading">Searching…</div></div>`;
   try {
     const data = await api(`/api/search?q=${encodeURIComponent(query)}`);
     if (!data.quotes.length) { el('sf-body').innerHTML = `<div class="muted" style="padding:12px">No matches for "${esc(query)}".</div>`; return; }
@@ -923,7 +951,7 @@ function setLp(id, html) { const e = el(id); if (e) { e.innerHTML = html; wireRo
 
 async function showLaunchpad() {
   state.view = 'LAUNCH'; setActiveTabs('HOME'); markFunc(null);
-  el('view').innerHTML = fnBar('LAUNCHPAD', 'LAUNCH', 'Live') + `<div class="lp-grid">
+  el('view').innerHTML = fnBar('LAUNCHPAD', 'LAUNCH', 'LAUNCH') + `<div class="lp-grid">
     <div class="lp-panel"><div class="lp-head">WORLD CLOCKS</div><div class="lp-body" id="lp-clocks"><div class="loading">…</div></div></div>
     <div class="lp-panel"><div class="lp-head">MAJOR INDICES</div><div class="lp-body pad0" id="lp-idx"><div class="loading">…</div></div></div>
     <div class="lp-panel"><div class="lp-head">TOP MOVERS</div><div class="lp-body pad0" id="lp-mov"><div class="loading">…</div></div></div>
@@ -971,7 +999,7 @@ async function showLaunchpad() {
 
 function showHelp() {
   state.view = 'HELP'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = fnBar('TERMINAL GUIDE', 'HELP') + `<div class="help-body">
+  el('view').innerHTML = fnBar('TERMINAL GUIDE', 'HELP', 'HELP') + `<div class="help-body">
     <h2>OPENTERM</h2>
     <p>A Bloomberg-style market terminal. Type a command in the amber line and press <span class="ex">GO</span> (Enter). Commands are <b>SECURITY</b> then <b>FUNCTION</b>, just like a Bloomberg &lt;GO&gt; string.</p>
     <div class="sec-bar" style="position:static;margin:8px 0 4px">SECURITY FUNCTIONS</div>
@@ -1149,8 +1177,11 @@ function init() {
   setInterval(() => { if (state.view === 'LAUNCH') showLaunchpad(); }, 90_000);
   setInterval(loadTicker, 300_000);
 
-  document.querySelectorAll('.top-tab, #help-btn').forEach((b) =>
-    b.addEventListener('click', () => runCommand(b.dataset.cmd)));
+  // chrome + help wiring
+  el('help-btn').addEventListener('click', () => runCommand('HELP'));
+  document.querySelector('.chr-menu').addEventListener('click', () => runCommand('HELP'));
+  document.querySelector('.chr-ic.help').addEventListener('click', () => runCommand('HELP'));
+  el('chr-sec').addEventListener('click', () => { if (el('chr-sec').dataset.cmd) loadSecurity(el('chr-sec').dataset.cmd, state.func || 'GP'); });
 
   const cmd = el('cmd');
   cmd.addEventListener('input', onCmdInput);
