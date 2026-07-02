@@ -2,7 +2,8 @@
  * OpenTerm server — proxies free market-data APIs and serves the frontend.
  *
  * Data sources (all free tiers):
- *   - Yahoo Finance (no key): quotes, OHLC history, search, news fallback
+ *   - Yahoo Finance (no key): quotes, OHLC history, search, screeners,
+ *     trending, fundamentals (via cookie+crumb), news fallback
  *   - Finnhub (optional key): company news + profile
  *   - CoinGecko (no key): crypto board
  *   - Frankfurter / ECB (no key): FX rates
@@ -40,7 +41,6 @@ function cached(key, ttlMs, fn) {
   cache.set(key, { exp: Date.now() + ttlMs, promise });
   return promise;
 }
-// prevent unbounded growth
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of cache) if (v.exp < now) cache.delete(k);
@@ -67,6 +67,46 @@ function cleanSymbol(raw) {
   const s = String(raw || '').trim().toUpperCase();
   if (!SYM_RE.test(s)) throw new Error('invalid symbol');
   return s;
+}
+
+/* ------------------------------------------------- yahoo cookie+crumb */
+
+// quoteSummary / v7 endpoints require a session cookie and matching crumb.
+let yahooAuth = { cookie: '', crumb: '', exp: 0 };
+
+async function getYahooAuth(force = false) {
+  if (!force && yahooAuth.crumb && yahooAuth.exp > Date.now()) return yahooAuth;
+  const r1 = await request('https://fc.yahoo.com/', { headers: { 'User-Agent': UA }, dispatcher });
+  await r1.body.dump();
+  const raw = r1.headers['set-cookie'];
+  const cookie = (Array.isArray(raw) ? raw : [raw])
+    .filter(Boolean).map((c) => String(c).split(';')[0]).join('; ');
+  const r2 = await request('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+    headers: { 'User-Agent': UA, Cookie: cookie }, dispatcher,
+  });
+  const crumb = (await r2.body.text()).trim();
+  if (!crumb || crumb.length > 40) throw new Error('could not obtain Yahoo crumb');
+  yahooAuth = { cookie, crumb, exp: Date.now() + 25 * 60_000 };
+  return yahooAuth;
+}
+
+async function getAuthedJSON(buildUrl) {
+  let auth = await getYahooAuth();
+  let res = await request(buildUrl(auth.crumb), {
+    headers: { 'User-Agent': UA, Accept: 'application/json', Cookie: auth.cookie }, dispatcher,
+  });
+  if (res.statusCode === 401 || res.statusCode === 403) {
+    await res.body.dump();
+    auth = await getYahooAuth(true); // crumb expired — refresh once
+    res = await request(buildUrl(auth.crumb), {
+      headers: { 'User-Agent': UA, Accept: 'application/json', Cookie: auth.cookie }, dispatcher,
+    });
+  }
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    await res.body.dump();
+    throw new Error(`${res.statusCode} from Yahoo`);
+  }
+  return res.body.json();
 }
 
 /* ------------------------------------------------------- yahoo finance */
@@ -114,11 +154,10 @@ app.get('/api/quote/:symbol', async (req, res) => {
   } catch (err) { fail(res, err); }
 });
 
-// Batch quotes for the watchlist / index strip: /api/quotes?symbols=AAPL,MSFT
 app.get('/api/quotes', async (req, res) => {
   try {
     const symbols = String(req.query.symbols || '')
-      .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 25)
+      .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 40)
       .map(cleanSymbol);
     const settled = await Promise.allSettled(symbols.map((s) =>
       cached(`q:${s}`, 10_000, async () => quoteFromMeta((await yahooChart(s, '1d', '1m')).meta))));
@@ -158,7 +197,7 @@ app.get('/api/search', async (req, res) => {
   try {
     const q = String(req.query.q || '').slice(0, 60);
     if (!q) return res.json({ quotes: [], news: [] });
-    const url = `${YF}/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=10&newsCount=0`;
+    const url = `${YF}/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=12&newsCount=0`;
     const data = await cached(`s:${q.toLowerCase()}`, 300_000, () => getJSON(url));
     res.json({
       quotes: (data.quotes || [])
@@ -175,6 +214,131 @@ app.get('/api/search', async (req, res) => {
   } catch (err) { fail(res, err); }
 });
 
+/* ------------------------------------------------------------- movers */
+
+const SCREENERS = {
+  gainers: 'day_gainers',
+  losers: 'day_losers',
+  actives: 'most_actives',
+};
+
+function moverRow(q) {
+  const price = q.regularMarketPrice;
+  return {
+    symbol: q.symbol,
+    name: q.shortName || q.longName || q.symbol,
+    price,
+    change: q.regularMarketChange,
+    changePct: q.regularMarketChangePercent,
+    volume: q.regularMarketVolume,
+    marketCap: q.marketCap ?? null,
+    exchange: q.fullExchangeName || '',
+  };
+}
+
+app.get('/api/movers', async (req, res) => {
+  try {
+    const type = SCREENERS[req.query.type] ? req.query.type : 'gainers';
+    const rows = await cached(`mov:${type}`, 60_000, async () => {
+      const url = `${YF}/v1/finance/screener/predefined/saved?count=25&scrIds=${SCREENERS[type]}`;
+      const data = await getJSON(url);
+      const list = data.finance?.result?.[0]?.quotes || [];
+      return list.map(moverRow);
+    });
+    res.json({ type, rows });
+  } catch (err) { fail(res, err); }
+});
+
+app.get('/api/trending', async (_req, res) => {
+  try {
+    const syms = await cached('trending', 300_000, async () => {
+      const url = `${YF}/v1/finance/trending/US?count=15`;
+      const data = await getJSON(url);
+      return (data.finance?.result?.[0]?.quotes || []).map((q) => q.symbol).filter(Boolean);
+    });
+    res.json({ symbols: syms });
+  } catch (err) { fail(res, err); }
+});
+
+/* ------------------------------------------------------- fundamentals */
+
+const num = (x) => (x && typeof x === 'object' && 'raw' in x ? x.raw : (typeof x === 'number' ? x : null));
+
+app.get('/api/summary/:symbol', async (req, res) => {
+  try {
+    const symbol = cleanSymbol(req.params.symbol);
+    const data = await cached(`sum:${symbol}`, 600_000, async () => {
+      const modules = 'summaryDetail,defaultKeyStatistics,financialData,price,summaryProfile,calendarEvents,earnings';
+      const json = await getAuthedJSON((crumb) =>
+        `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}&crumb=${encodeURIComponent(crumb)}`);
+      const r = json.quoteSummary?.result?.[0];
+      if (!r) throw new Error(json.quoteSummary?.error?.description || 'no fundamentals');
+      const sd = r.summaryDetail || {}, ks = r.defaultKeyStatistics || {},
+        fd = r.financialData || {}, pr = r.price || {}, sp = r.summaryProfile || {},
+        ce = r.calendarEvents || {}, ea = r.earnings || {};
+      const earningsQuarterly = (ea.earningsChart?.quarterly || []).map((q) => ({
+        period: q.date, actual: num(q.actual), estimate: num(q.estimate),
+      }));
+      const yearly = (ea.financialsChart?.yearly || []).map((y) => ({
+        year: y.date, revenue: num(y.revenue), earnings: num(y.earnings),
+      }));
+      return {
+        symbol,
+        name: pr.longName || pr.shortName || symbol,
+        sector: sp.sector || '',
+        industry: sp.industry || '',
+        website: sp.website || '',
+        country: sp.country || '',
+        employees: num(sp.fullTimeEmployees),
+        summary: sp.longBusinessSummary || '',
+        marketCap: num(pr.marketCap) ?? num(sd.marketCap),
+        peTrailing: num(sd.trailingPE),
+        peForward: num(sd.forwardPE) ?? num(ks.forwardPE),
+        pegRatio: num(ks.pegRatio),
+        priceToBook: num(ks.priceToBook),
+        eps: num(ks.trailingEps),
+        beta: num(sd.beta) ?? num(ks.beta),
+        dividendYield: num(sd.dividendYield),
+        dividendRate: num(sd.dividendRate),
+        payoutRatio: num(sd.payoutRatio),
+        sharesOut: num(ks.sharesOutstanding),
+        floatShares: num(ks.floatShares),
+        heldPctInsiders: num(ks.heldPercentInsiders),
+        heldPctInstitutions: num(ks.heldPercentInstitutions),
+        shortPctFloat: num(ks.shortPercentOfFloat),
+        profitMargin: num(fd.profitMargins) ?? num(ks.profitMargins),
+        operatingMargin: num(fd.operatingMargins),
+        grossMargin: num(fd.grossMargins),
+        roe: num(fd.returnOnEquity),
+        roa: num(fd.returnOnAssets),
+        revenue: num(fd.totalRevenue),
+        revenueGrowth: num(fd.revenueGrowth),
+        earningsGrowth: num(fd.earningsGrowth),
+        grossProfits: num(fd.grossProfits),
+        ebitda: num(fd.ebitda),
+        totalCash: num(fd.totalCash),
+        totalDebt: num(fd.totalDebt),
+        debtToEquity: num(fd.debtToEquity),
+        currentRatio: num(fd.currentRatio),
+        freeCashflow: num(fd.freeCashflow),
+        targetMean: num(fd.targetMeanPrice),
+        targetHigh: num(fd.targetHighPrice),
+        targetLow: num(fd.targetLowPrice),
+        recommendationKey: fd.recommendationKey || '',
+        recommendationMean: num(fd.recommendationMean),
+        numberOfAnalysts: num(fd.numberOfAnalystOpinions),
+        high52w: num(sd.fiftyTwoWeekHigh),
+        low52w: num(sd.fiftyTwoWeekLow),
+        avgVolume: num(sd.averageVolume),
+        nextEarningsDate: (ce.earnings?.earningsDate || []).map(num).filter(Boolean)[0] || null,
+        earningsQuarterly,
+        yearly,
+      };
+    });
+    res.json(data);
+  } catch (err) { fail(res, err); }
+});
+
 /* ---------------------------------------------------------------- news */
 
 app.get('/api/news', async (req, res) => {
@@ -186,11 +350,10 @@ app.get('/api/news', async (req, res) => {
         const from = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
         const url = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}&token=${FINNHUB_KEY}`;
         const data = await getJSON(url);
-        return data.slice(0, 25).map((n) => ({
+        return data.slice(0, 30).map((n) => ({
           title: n.headline, source: n.source, url: n.url, time: n.datetime, summary: n.summary || '',
         }));
       }
-      // No-key fallback: Yahoo search returns recent stories for the symbol.
       const url = `${YF}/v1/finance/search?q=${encodeURIComponent(symbol)}&quotesCount=0&newsCount=20`;
       const data = await getJSON(url);
       return (data.news || []).map((n) => ({
@@ -271,7 +434,7 @@ app.get('/api/fx', async (req, res) => {
 app.get('/api/crypto', async (_req, res) => {
   try {
     const data = await cached('crypto', 60_000, async () => {
-      const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1&sparkline=false&price_change_percentage=24h';
+      const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=25&page=1&sparkline=false&price_change_percentage=24h';
       const coins = await getJSON(url);
       return coins.map((c) => ({
         id: c.id,
