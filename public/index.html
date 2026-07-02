@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OPENTERM — Market Terminal</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'&gt;&lt;rect width='16' height='16' fill='black'/&gt;&lt;text x='2' y='12' font-size='11' fill='%23ff9900' font-family='monospace'&gt;OT&lt;/text&gt;&lt;/svg&gt;">
+</head>
+<body>
+  <div id="terminal">
+
+    <!-- command bar -->
+    <div id="cmdbar">
+      <span id="cmd-prompt">&gt;</span>
+      <input id="cmd" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Enter command — e.g. AAPL GP, MSFT DES, NVDA N, FX, CRYP, HELP" autofocus>
+      <button id="go-btn">&lt;GO&gt;</button>
+    </div>
+    <div id="cmd-msg"></div>
+    <div id="autocomplete" class="hidden"></div>
+
+    <!-- index strip -->
+    <div id="tape"></div>
+
+    <!-- security header -->
+    <div id="sec-header" class="hidden">
+      <div id="sec-title">
+        <span id="sec-symbol"></span>
+        <span id="sec-name"></span>
+        <span id="sec-exch"></span>
+      </div>
+      <div id="sec-quote">
+        <span id="sec-price"></span>
+        <span id="sec-change"></span>
+        <span id="sec-time"></span>
+      </div>
+    </div>
+
+    <!-- main workspace -->
+    <div id="workspace">
+      <div id="main-panel" class="panel">
+        <div class="panel-title" id="main-title">WELCOME</div>
+        <div class="panel-body" id="main-body">
+          <div id="screen-help" class="screen"></div>
+          <div id="screen-chart" class="screen hidden">
+            <div id="chart-toolbar">
+              <span class="tb-label">RANGE</span>
+              <span class="range-btns"></span>
+              <span class="tb-label">TYPE</span>
+              <button class="tb-btn type-btn" data-type="candle">CANDLE</button>
+              <button class="tb-btn type-btn" data-type="line">LINE</button>
+            </div>
+            <div id="chart-wrap"><canvas id="chart"></canvas></div>
+            <div id="chart-legend"></div>
+          </div>
+          <div id="screen-des" class="screen hidden"></div>
+          <div id="screen-news" class="screen hidden"></div>
+          <div id="screen-fx" class="screen hidden"></div>
+          <div id="screen-cryp" class="screen hidden"></div>
+          <div id="screen-search" class="screen hidden"></div>
+        </div>
+      </div>
+
+      <div id="side-panels">
+        <div class="panel" id="watch-panel">
+          <div class="panel-title">WATCHLIST <span class="title-hint">W ADD/DEL &lt;SYM&gt;</span></div>
+          <div class="panel-body" id="watchlist"></div>
+        </div>
+        <div class="panel" id="mini-news-panel">
+          <div class="panel-title">TOP NEWS <span class="title-hint">N &lt;GO&gt; FOR MORE</span></div>
+          <div class="panel-body" id="mini-news"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- status bar -->
+    <div id="statusbar">
+      <span class="fn-key"><b>GP</b> Chart</span>
+      <span class="fn-key"><b>DES</b> Description</span>
+      <span class="fn-key"><b>N</b> News</span>
+      <span class="fn-key"><b>FX</b> Currencies</span>
+      <span class="fn-key"><b>CRYP</b> Crypto</span>
+      <span class="fn-key"><b>S</b> Search</span>
+      <span class="fn-key"><b>HELP</b> Guide</span>
+      <span id="clock"></span>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
