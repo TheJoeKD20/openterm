@@ -510,10 +510,12 @@ function showFA() {
 function renderFAShell() {
   const periods = faCache.fin ? faCache.fin.years.length : 4;
   const controls = `<span class="fn-ctrl"><b>Periods</b> ${periods} Annuals ▾</span><span class="fn-ctrl"><b>Cur</b> USD ▾</span>`;
-  el('view').innerHTML = fnBar('FINANCIAL ANALYSIS', 'FA', eqBox(), controls)
+  el('view').innerHTML = `<div class="fa-screen">`
+    + fnBar('FINANCIAL ANALYSIS', 'FA', eqBox(), controls)
     + `<div class="fa-tabs">${FA_TABS.map(([k, l], i) =>
         `<button class="fa-tab ${k === faCache.tab ? 'active' : ''}" data-tab="${k}"><span class="n">${i + 1})</span>${l}</button>`).join('')}</div>`
-    + `<div id="fa-body"><div class="loading">Loading…</div></div>`;
+    + `<div id="fa-body"><div class="loading">Loading…</div></div>`
+    + `</div>`;
   el('view').querySelectorAll('.fa-tab').forEach((b) =>
     b.addEventListener('click', () => { faCache.tab = b.dataset.tab; renderFAShell(); loadFATab(); }));
   setSuggest('<span class="sg">Suggested Functions &nbsp; <b>FA</b> Financial Analysis &nbsp;·&nbsp; <b>EVTS</b> Company Events &nbsp;·&nbsp; <b>MODL</b> Earnings Model &nbsp;·&nbsp; <b>ERN</b> Earnings &nbsp;·&nbsp; <b>DES</b> Description</span>');
@@ -542,23 +544,73 @@ function fmtFin(v, label) {
   return fmtBig(v);
 }
 
-function statementTable(years, rows, unit, groupLabel) {
+// sections = [{ label, rows:[{label, values, fmt?}] }]
+function statementTable(years, sections, unit) {
   const head = `<tr><th class="fin-unit">${esc(unit)}</th>${years.map((y) => `<th class="num">${esc(y)} Y</th>`).join('')}</tr>`
     + `<tr><th class="fin-unit muted" style="font-size:10px">12 Months Ending</th>${years.map((y) => `<th class="num muted" style="font-size:10px">12/31/${esc(y)}</th>`).join('')}</tr>`;
-  const grp = groupLabel ? `<tr class="grp"><td class="fin-label">${esc(groupLabel)}</td>${years.map(() => '<td></td>').join('')}</tr>` : '';
-  const body = rows.map((r) => `<tr>
-    <td class="fin-label indent">${GLYPH}<span>${esc(r.label)}</span></td>
-    ${r.values.map((v) => (v == null
-      ? '<td class="dash">–</td>'
-      : `<td class="num">${r.fmt ? r.fmt(v) : fmtFin(v, r.label)}</td>`)).join('')}
-  </tr>`).join('');
-  return `<div class="tbl-wrap"><table class="fin">${head}${grp}${body}</table></div>`;
+  const bodyHTML = sections.map((sec) => {
+    const grp = `<tr class="grp"><td class="fin-label">${esc(sec.label)}</td>${years.map(() => '<td></td>').join('')}</tr>`;
+    const rows = sec.rows.map((r) => `<tr>
+      <td class="fin-label indent">${GLYPH}<span>${esc(r.label)}</span></td>
+      ${r.values.map((v) => (v == null
+        ? '<td class="dash">–</td>'
+        : `<td class="num">${r.fmt ? r.fmt(v) : fmtFin(v, r.label)}</td>`)).join('')}
+    </tr>`).join('');
+    return grp + rows;
+  }).join('');
+  return `<div class="tbl-wrap"><table class="fin">${head}${bodyHTML}</table></div>`;
+}
+
+// derived analytic rows appended below each statement to fill the workspace
+function derivedSections(fin, which) {
+  const asPct = (v) => (v == null ? '—' : fmtNum(v, 1) + '%');
+  const asX = (v) => (v == null ? '—' : fmtNum(v, 2) + 'x');
+  const pct = (a, b) => (a != null && b ? (a / b) * 100 : null);
+  const get = (arr, l) => (arr.find((r) => r.label === l) || {}).values || [];
+  const drow = (label, fn, fmt) => ({ label, values: fin.years.map((_, i) => fn(i)), fmt });
+  if (which === 'income') {
+    const rev = get(fin.income, 'Revenue'), gp = get(fin.income, 'Gross Profit'), oi = get(fin.income, 'Operating Income'),
+      eb = get(fin.income, 'EBITDA'), ni = get(fin.income, 'Net Income'), pt = get(fin.income, 'Pretax Income'), tx = get(fin.income, 'Tax Provision');
+    return [
+      { label: 'MARGINS', rows: [
+        drow('Gross Margin', (i) => pct(gp[i], rev[i]), asPct),
+        drow('Operating Margin', (i) => pct(oi[i], rev[i]), asPct),
+        drow('EBITDA Margin', (i) => pct(eb[i], rev[i]), asPct),
+        drow('Net Margin', (i) => pct(ni[i], rev[i]), asPct),
+        drow('Effective Tax Rate', (i) => pct(tx[i], pt[i]), asPct),
+      ] },
+      { label: 'GROWTH (YoY)', rows: [
+        drow('Revenue Growth', (i) => (rev[i + 1] ? ((rev[i] - rev[i + 1]) / Math.abs(rev[i + 1])) * 100 : null), asPct),
+        drow('Net Income Growth', (i) => (ni[i + 1] ? ((ni[i] - ni[i + 1]) / Math.abs(ni[i + 1])) * 100 : null), asPct),
+        drow('EBITDA Growth', (i) => (eb[i + 1] ? ((eb[i] - eb[i + 1]) / Math.abs(eb[i + 1])) * 100 : null), asPct),
+      ] },
+    ];
+  }
+  if (which === 'balance') {
+    const ca = get(fin.balance, 'Total Current Assets'), cl = get(fin.balance, 'Total Current Liab.'),
+      td = get(fin.balance, 'Total Debt'), te = get(fin.balance, 'Total Equity'), ta = get(fin.balance, 'Total Assets');
+    return [{ label: 'LIQUIDITY & LEVERAGE', rows: [
+      drow('Current Ratio', (i) => (cl[i] ? ca[i] / cl[i] : null), asX),
+      drow('Debt / Equity', (i) => (te[i] ? td[i] / te[i] : null), asX),
+      drow('Debt / Assets', (i) => pct(td[i], ta[i]), asPct),
+      drow('Equity / Assets', (i) => pct(te[i], ta[i]), asPct),
+    ] }];
+  }
+  if (which === 'cashflow') {
+    const ocf = get(fin.cashflow, 'Cash from Operations'), capex = get(fin.cashflow, 'Capital Expenditure'), fcf = get(fin.cashflow, 'Free Cash Flow');
+    return [{ label: 'CASH FLOW ANALYSIS', rows: [
+      drow('CapEx % of Op Cash Flow', (i) => (ocf[i] ? pct(Math.abs(capex[i]), ocf[i]) : null), asPct),
+      drow('FCF Conversion (FCF/OCF)', (i) => pct(fcf[i], ocf[i]), asPct),
+    ] }];
+  }
+  return [];
 }
 
 function renderStatement(fin, which, body) {
   if (!fin[which] || !fin[which].length) { body.innerHTML = '<div class="muted" style="padding:12px">No data for this statement.</div>'; return; }
   const title = { income: 'INCOME STATEMENT', balance: 'BALANCE SHEET', cashflow: 'STATEMENT OF CASH FLOWS' }[which];
-  body.innerHTML = statementTable(fin.years, fin[which], 'In Millions of USD', title);
+  const sections = [{ label: title, rows: fin[which] }, ...derivedSections(fin, which)];
+  body.innerHTML = statementTable(fin.years, sections, 'In Millions of USD');
 }
 
 function renderFARatios(fin, body) {
@@ -582,7 +634,7 @@ function renderFARatios(fin, body) {
     ratioRow('Revenue Growth', (i) => (rev[i + 1] ? ((rev[i] - rev[i + 1]) / Math.abs(rev[i + 1])) * 100 : null), asPct),
     ratioRow('Net Income Growth', (i) => (ni[i + 1] ? ((ni[i] - ni[i + 1]) / Math.abs(ni[i + 1])) * 100 : null), asPct),
   ];
-  body.innerHTML = statementTable(fin.years, rows, 'Derived Ratios', 'KEY RATIOS');
+  body.innerHTML = statementTable(fin.years, [{ label: 'KEY RATIOS', rows }], 'Derived Ratios');
 }
 
 function renderFAOverview(s, body) {
@@ -949,32 +1001,54 @@ function renderLpClocks() {
 
 function setLp(id, html) { const e = el(id); if (e) { e.innerHTML = html; wireRows(e); } }
 
+function heatGrid(rows, byName) {
+  return `<div class="heat">${rows.map(([sym, label]) => {
+    const q = byName[sym];
+    const p = q && !q.error ? q.changePct : 0;
+    const a = Math.min(0.85, Math.abs(p) / 6 * 0.7 + 0.15);
+    const bg = q && !q.error ? (p >= 0 ? `rgba(0,200,83,${a})` : `rgba(255,51,77,${a})`) : '#11151b';
+    return `<div class="heat-cell click" data-sym="${esc(sym)}" style="background:${bg}">
+      <div class="hc-sym">${esc(label)}</div><div class="hc-pct">${q && !q.error ? (p >= 0 ? '+' : '') + fmtNum(p) + '%' : '—'}</div></div>`;
+  }).join('')}</div>`;
+}
+
 async function showLaunchpad() {
   state.view = 'LAUNCH'; setActiveTabs('HOME'); markFunc(null);
-  el('view').innerHTML = fnBar('LAUNCHPAD', 'LAUNCH', 'LAUNCH') + `<div class="lp-grid">
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('LAUNCHPAD', 'LAUNCH', 'LAUNCH') + `<div class="lp-grid">
     <div class="lp-panel"><div class="lp-head">WORLD CLOCKS</div><div class="lp-body" id="lp-clocks"><div class="loading">…</div></div></div>
     <div class="lp-panel"><div class="lp-head">MAJOR INDICES</div><div class="lp-body pad0" id="lp-idx"><div class="loading">…</div></div></div>
     <div class="lp-panel"><div class="lp-head">TOP MOVERS</div><div class="lp-body pad0" id="lp-mov"><div class="loading">…</div></div></div>
     <div class="lp-panel"><div class="lp-head">GICS SECTOR MONITOR</div><div class="lp-body" id="lp-sect"><div class="loading">…</div></div></div>
     <div class="lp-panel"><div class="lp-head">FX MAJORS</div><div class="lp-body pad0" id="lp-fx"><div class="loading">…</div></div></div>
     <div class="lp-panel"><div class="lp-head">COMMODITIES</div><div class="lp-body pad0" id="lp-cmd"><div class="loading">…</div></div></div>
-    <div class="lp-panel lp-wide"><div class="lp-head">GLOBAL MACRO NEWS</div><div class="lp-body" id="lp-news"><div class="loading">…</div></div></div>
-  </div>`;
+    <div class="lp-panel"><div class="lp-head">US RATES / YIELDS</div><div class="lp-body pad0" id="lp-rate"><div class="loading">…</div></div></div>
+    <div class="lp-panel"><div class="lp-head">INDEX FUTURES</div><div class="lp-body pad0" id="lp-fut"><div class="loading">…</div></div></div>
+    <div class="lp-panel span2"><div class="lp-head">WATCHLIST HEATMAP</div><div class="lp-body pad0" id="lp-heat"><div class="loading">…</div></div></div>
+    <div class="lp-panel span2"><div class="lp-head">GLOBAL MACRO NEWS</div><div class="lp-body" id="lp-news"><div class="loading">…</div></div></div>
+  </div></div>`;
   renderLpClocks();
   api('/api/weather').then((w) => { lpWeather = w; renderLpClocks(); }).catch(() => {});
 
   const idx = [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq'], ['^DJI', 'Dow Jones'], ['^RUT', 'Russell 2K'], ['^VIX', 'VIX'], ['^TNX', 'US 10Y']];
   const fx = [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['USDJPY=X', 'USD/JPY'], ['USDCNY=X', 'USD/CNY'], ['DX-Y.NYB', 'Dollar Idx']];
   const cmd = [['GC=F', 'Gold'], ['CL=F', 'WTI'], ['BZ=F', 'Brent'], ['NG=F', 'Nat Gas'], ['HG=F', 'Copper'], ['SI=F', 'Silver']];
-  quoteBoard([...idx, ...fx, ...cmd].map((r) => r[0])).then((bn) => {
+  const rate = [['^IRX', 'US 3-Month'], ['^FVX', 'US 5-Year'], ['^TNX', 'US 10-Year'], ['^TYX', 'US 30-Year']];
+  const fut = [['ES=F', 'S&P Fut'], ['NQ=F', 'Nasdaq Fut'], ['YM=F', 'Dow Fut'], ['RTY=F', 'Russell Fut'], ['GC=F', 'Gold Fut'], ['CL=F', 'Crude Fut']];
+  quoteBoard([...idx, ...fx, ...cmd, ...rate, ...fut].map((r) => r[0])).then((bn) => {
     setLp('lp-idx', boardTable(idx, bn));
     setLp('lp-fx', boardTable(fx, bn, { spark: false }));
     setLp('lp-cmd', boardTable(cmd, bn, { spark: false }));
+    setLp('lp-rate', boardTable(rate, bn, { spark: false }));
+    setLp('lp-fut', boardTable(fut, bn, { spark: false }));
+  }).catch(() => {});
+
+  quoteBoard(state.watchlist.map((s) => s)).then((bn) => {
+    setLp('lp-heat', heatGrid(state.watchlist.map((s) => [s, s]), bn));
   }).catch(() => {});
 
   api('/api/movers?type=gainers').then((d) => {
     setLp('lp-mov', `<div class="tbl-wrap"><table class="data">
-      ${d.rows.slice(0, 9).map((r) => `<tr class="click" data-sym="${esc(r.symbol)}">
+      ${d.rows.slice(0, 10).map((r) => `<tr class="click" data-sym="${esc(r.symbol)}">
         <td class="sym">${esc(r.symbol)}</td><td class="num">${fmtPrice(r.price)}</td>
         <td class="num ${chgClass(r.change)}">${arrow(r.change)}${fmtNum(Math.abs(r.changePct))}%</td>
         <td class="spark-td">${sparkCell(r.symbol)}</td></tr>`).join('')}</table></div>`);
@@ -992,7 +1066,16 @@ async function showLaunchpad() {
     }).join(''));
   }).catch(() => {});
 
-  api('/api/news?symbol=SPY').then((d) => { const n = el('lp-news'); if (n) n.innerHTML = newsHTML(d.items, 10); }).catch(() => {});
+  api('/api/news?symbol=SPY').then((d) => {
+    const n = el('lp-news');
+    if (!n) return;
+    const items = d.items || [];
+    const lead = items[0];
+    n.innerHTML = (lead ? `<div class="news-item"><a href="${esc(lead.url)}" target="_blank" rel="noopener">${esc(lead.title)}</a>
+      <div class="news-meta"><span class="src">${esc(lead.source || '')}</span> · ${timeAgo(lead.time)}</div>
+      <div class="biz-summary" style="color:var(--orange)">${esc((lead.summary || 'Reuters and wire coverage across global equity, rates, FX and commodity markets. Select a headline to open the full story.').slice(0, 240))}</div></div>` : '')
+      + newsHTML(items.slice(1), 14);
+  }).catch(() => {});
 }
 
 /* ---------------------------------------------------------------- HELP */

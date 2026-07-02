@@ -49,7 +49,7 @@ html, body {
 button { font-family: var(--font-ui); cursor: pointer; color: inherit; }
 .hidden { display: none !important; }
 
-#terminal { display: flex; flex-direction: column; height: 100vh; height: 100dvh; padding: 2px; gap: 2px; }
+#terminal { position: fixed; inset: 0; display: flex; flex-direction: column; height: 100vh; height: 100dvh; padding: 2px; gap: 2px; overflow: hidden; }
 
 /* -------------------------------------------------- 1) app chrome bar */
 
@@ -242,9 +242,16 @@ canvas.spark { display: block; vertical-align: middle; }
 
 /* -------------------------------------------------- launchpad */
 
-.lp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 2px; padding: 2px; align-items: start; }
-.lp-panel { border: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-width: 0; }
+.lp-grid {
+  flex: 1; min-height: 0; display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: 172px 200px minmax(0, 1fr);
+  gap: 2px; padding: 2px;
+}
+.lp-panel { border: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.lp-panel .lp-body { flex: 1; min-height: 0; overflow: auto; }
 .lp-panel.lp-wide { grid-column: 1 / -1; }
+.lp-panel.span2 { grid-column: span 2; }
 .lp-head { background: var(--panel-2); color: var(--orange); font-weight: bold; font-size: 11px; text-transform: uppercase; padding: 1px 6px; height: 17px; border-bottom: 1px solid var(--border); display: flex; align-items: center; }
 .lp-body { padding: 2px 4px; overflow-x: auto; }
 .lp-body.pad0 { padding: 0; }
@@ -341,6 +348,22 @@ table.fin tr:hover td { background: #0b1a26; }
 .loading { color: var(--muted); padding: 8px; }
 .err { color: var(--red-down); padding: 8px; }
 
+/* -------------------------------------------------- fill layout */
+
+/* FA and other full-height screens fill the workspace edge-to-edge */
+.fa-screen { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+#fa-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+#fa-body .tbl-wrap { flex: 1; min-height: 0; overflow: auto; }
+#fa-body table.fin { height: 100%; }               /* stretch rows to fill height */
+#fa-body .sec-body { flex: 1; overflow: auto; }
+
+/* launchpad watchlist heatmap */
+.heat { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); gap: 2px; padding: 2px; }
+.heat-cell { border: 1px solid #000; padding: 2px 4px; cursor: pointer; font-family: var(--font-data); line-height: 1.1; }
+.heat-cell .hc-sym { color: #fff; font-weight: bold; font-size: 11px; }
+.heat-cell .hc-pct { font-size: 11px; color: #fff; }
+.heat-cell:hover { outline: 1px solid var(--cyan); }
+
 /* -------------------------------------------------- responsive */
 
 @media (max-width: 760px) {
@@ -349,7 +372,12 @@ table.fin tr:hover td { background: #0b1a26; }
   #help-btn { display: none; }
   .grid-2 { grid-template-columns: 1fr; }
   .grid-2 > .section { border-right: none; }
-  .lp-grid { grid-template-columns: 1fr; }
+  /* on phones, stack panels and let the view scroll (Option B) */
+  .lp-grid { height: auto; grid-template-columns: 1fr; grid-template-rows: none; grid-auto-rows: minmax(150px, auto); }
+  .lp-panel.span2, .lp-panel.lp-wide { grid-column: auto; }
+  #view { overflow-y: auto; }
+  .fa-screen { height: auto; min-height: 100%; }
+  #fa-body table.fin { height: auto; }
   #autocomplete { left: 4px; right: 4px; min-width: 0; width: auto; }
   #news-ticker-wrap { display: none; }
   .fn-name { padding: 0 8px; }
