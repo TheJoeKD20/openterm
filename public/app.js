@@ -138,6 +138,33 @@ function secBar(title, right = '', extra = '') {
   return `<div class="sec-bar"><span>${title}</span><span class="right">${right}</span>${extra}</div>`;
 }
 
+// The iconic red Bloomberg function title bar with numbered action buttons.
+function fnBar(name, code, right = '') {
+  return `<div class="fn-bar">
+    <span class="fn-actions">
+      <button class="fn-act" data-act="actions"><span class="n">96)</span>ACTIONS</button>
+      <button class="fn-act" data-act="export"><span class="n">97)</span>EXPORT</button>
+      <button class="fn-act" data-act="settings"><span class="n">98)</span>SETTINGS</button>
+    </span>
+    <span class="fn-name">${esc(name)}<span class="code">${esc(code)}${right ? ' · ' + esc(right) : ''}</span></span>
+  </div>`;
+}
+
+// EXPORT (97): download the first data table on screen as CSV — a real Bloomberg action.
+function exportCSV() {
+  const table = el('view').querySelector('table.data');
+  if (!table) { msg('Nothing to export on this screen', true); return; }
+  const rows = [...table.rows].map((tr) => [...tr.cells]
+    .map((td) => `"${(td.textContent || '').trim().replace(/\s+/g, ' ').replace(/"/g, '""')}"`).join(','));
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `openterm-${(state.symbol || state.view || 'export').toLowerCase()}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  msg('Exported current table to CSV');
+}
+
 /* ------------------------------------------------------------ security */
 
 async function loadSecurity(symbol, func = 'GP') {
@@ -204,6 +231,7 @@ async function showChart(range) {
   setActiveTabs(null);
   el('view').innerHTML = `
     <div id="screen-chart">
+      ${fnBar(state.range === '1d' ? 'INTRADAY PRICE GRAPH' : 'PRICE GRAPH', state.range === '1d' ? 'GIP' : 'GP', state.symbol)}
       <div id="chart-toolbar">
         <span class="tb-label">RANGE</span>
         ${RANGE_LABELS.map(([r, l]) => `<button class="tb-btn rbtn" data-range="${r}">${l}</button>`).join('')}
@@ -355,7 +383,7 @@ function drawChart() {
 async function showDES() {
   if (!state.symbol) { msg('Load a security first', true); return; }
   setActiveTabs(null);
-  el('view').innerHTML = secBar(`DES — SECURITY DESCRIPTION`, esc(state.symbol)) +
+  el('view').innerHTML = fnBar('SECURITY DESCRIPTION', 'DES', state.symbol) +
     `<div class="sec-body"><div class="loading">Loading…</div></div>`;
   const body = el('view').querySelector('.sec-body');
   try {
@@ -404,7 +432,7 @@ async function showDES() {
 async function showFA() {
   if (!state.symbol) { msg('Load a security first', true); return; }
   setActiveTabs(null);
-  el('view').innerHTML = secBar('FA — FINANCIAL ANALYSIS', esc(state.symbol)) +
+  el('view').innerHTML = fnBar('FINANCIAL ANALYSIS', 'FA', state.symbol) +
     `<div class="sec-body"><div class="loading">Loading fundamentals…</div></div>`;
   const body = el('view').querySelector('.sec-body');
   try {
@@ -489,7 +517,7 @@ async function showFA() {
 async function showERN() {
   if (!state.symbol) { msg('Load a security first', true); return; }
   setActiveTabs(null);
-  el('view').innerHTML = secBar('ERN — EARNINGS', esc(state.symbol)) +
+  el('view').innerHTML = fnBar('EARNINGS', 'ERN', state.symbol) +
     `<div class="sec-body"><div class="loading">Loading earnings…</div></div>`;
   const body = el('view').querySelector('.sec-body');
   try {
@@ -539,7 +567,7 @@ function newsHTML(items, limit = 40) {
 async function showNews() {
   if (!state.symbol) { msg('Load a security first', true); return; }
   setActiveTabs(null);
-  el('view').innerHTML = secBar('CN — COMPANY NEWS', esc(state.symbol)) + `<div class="sec-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('COMPANY NEWS', 'CN', state.symbol) + `<div class="sec-body"><div class="loading">Loading…</div></div>`;
   const body = el('view').querySelector('.sec-body');
   try {
     const data = await api(`/api/news?symbol=${encodeURIComponent(state.symbol)}`);
@@ -549,7 +577,7 @@ async function showNews() {
 
 async function showTopNews() {
   state.view = 'TOP'; setActiveTabs('TOP'); markFunc(null);
-  el('view').innerHTML = secBar('TOP — TOP MARKET NEWS', 'Live') + `<div class="sec-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('TOP MARKET NEWS', 'TOP', 'Live') + `<div class="sec-body"><div class="loading">Loading…</div></div>`;
   const body = el('view').querySelector('.sec-body');
   try {
     const data = await api('/api/news?symbol=SPY');
@@ -594,7 +622,7 @@ function wireRows(container) {
 
 async function showWEI() {
   state.view = 'WEI'; setActiveTabs('WEI'); markFunc(null);
-  el('view').innerHTML = secBar('WEI — WORLD EQUITY INDICES', 'Live') + `<div id="wei-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('WORLD EQUITY INDICES', 'WEI', 'Live') + `<div id="wei-body"><div class="loading">Loading…</div></div>`;
   try {
     const all = Object.values(WORLD).flat().map((r) => r[0]);
     const byName = await quoteBoard(all);
@@ -608,7 +636,7 @@ async function showWEI() {
 
 async function showCommodities() {
   state.view = 'CMDTY'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = secBar('CMDTY — COMMODITIES', 'Live') + `<div id="cmdty-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('COMMODITIES', 'CMDTY', 'Live') + `<div id="cmdty-body"><div class="loading">Loading…</div></div>`;
   try {
     const all = Object.values(COMMODITIES).flat().map((r) => r[0]);
     const byName = await quoteBoard(all);
@@ -622,7 +650,7 @@ async function showCommodities() {
 
 async function showRates() {
   state.view = 'GOVT'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = secBar('GOVT — US TREASURY YIELDS & FUTURES', 'Live') + `<div id="rate-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('US TREASURY YIELDS & FUTURES', 'GOVT', 'Live') + `<div id="rate-body"><div class="loading">Loading…</div></div>`;
   try {
     const byName = await quoteBoard([...RATES, ...RATE_FUT].map((r) => r[0]));
     el('rate-body').innerHTML = `<div class="grid-2">
@@ -641,7 +669,7 @@ async function showMovers(type) {
   state.view = 'MOST'; setActiveTabs('MOST'); markFunc(null);
   const tabs = `<span class="tabs">${[['gainers', 'GAINERS'], ['losers', 'LOSERS'], ['actives', 'MOST ACTIVE']]
     .map(([t, l]) => `<button class="tab mv-tab ${t === moversType ? 'active' : ''}" data-mv="${t}">${l}</button>`).join('')}</span>`;
-  el('view').innerHTML = secBar('MOST — US MARKET MOVERS', '', tabs) + `<div id="mv-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('US MARKET MOVERS', 'MOST') + secBar('MOVERS', '', tabs) + `<div id="mv-body"><div class="loading">Loading…</div></div>`;
   el('view').querySelectorAll('.mv-tab').forEach((b) => b.addEventListener('click', () => showMovers(b.dataset.mv)));
   try {
     const data = await api(`/api/movers?type=${moversType}`);
@@ -663,7 +691,7 @@ async function showMovers(type) {
 
 async function showFX() {
   state.view = 'FX'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = secBar('FX — CURRENCY RATES (ECB REFERENCE)', '') + `<div id="fx-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('CURRENCY RATES (ECB REFERENCE)', 'FX') + `<div id="fx-body"><div class="loading">Loading…</div></div>`;
   try {
     const data = await api('/api/fx?base=USD');
     el('fx-body').innerHTML = `
@@ -686,7 +714,7 @@ async function showFX() {
 
 async function showCrypto() {
   state.view = 'CRYP'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = secBar('CRYP — CRYPTOCURRENCY MARKET', 'CoinGecko') + `<div id="cryp-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('CRYPTOCURRENCY MARKET', 'CRYP', 'CoinGecko') + `<div id="cryp-body"><div class="loading">Loading…</div></div>`;
   try {
     const coins = await api('/api/crypto');
     el('cryp-body').innerHTML = `<div class="tbl-wrap"><table class="data">
@@ -707,8 +735,7 @@ async function showCrypto() {
 
 async function showWatchlist() {
   state.view = 'W'; setActiveTabs('W'); markFunc(null);
-  const add = `<span class="right">Type "W ADD AAPL" / "W DEL AAPL"</span>`;
-  el('view').innerHTML = secBar('W — WATCHLIST / PORTFOLIO MONITOR', '', add) + `<div id="wl-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = fnBar('WATCHLIST / PORTFOLIO', 'W', 'W ADD / DEL <SYM>') + `<div id="wl-body"><div class="loading">Loading…</div></div>`;
   if (!state.watchlist.length) { el('wl-body').innerHTML = '<div class="muted" style="padding:12px">Watchlist empty. Add with <span class="hl">W ADD NVDA</span>.</div>'; return; }
   try {
     const quotes = await api(`/api/quotes?symbols=${encodeURIComponent(state.watchlist.join(','))}`);
@@ -738,7 +765,7 @@ async function showWatchlist() {
 
 async function showSearch(query) {
   state.view = 'SECF'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = secBar('SECF — SECURITY FINDER', esc(query)) + `<div id="sf-body"><div class="loading">Searching…</div></div>`;
+  el('view').innerHTML = fnBar('SECURITY FINDER', 'SECF', query) + `<div id="sf-body"><div class="loading">Searching…</div></div>`;
   try {
     const data = await api(`/api/search?q=${encodeURIComponent(query)}`);
     if (!data.quotes.length) { el('sf-body').innerHTML = `<div class="muted" style="padding:12px">No matches for "${esc(query)}".</div>`; return; }
@@ -794,7 +821,7 @@ async function showHome() {
 
 function showHelp() {
   state.view = 'HELP'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = secBar('HELP — TERMINAL GUIDE', '') + `<div class="help-body">
+  el('view').innerHTML = fnBar('TERMINAL GUIDE', 'HELP') + `<div class="help-body">
     <h2>OPENTERM</h2>
     <p>A Bloomberg-style market terminal. Type a command in the amber line and press <span class="ex">GO</span> (Enter). Commands are <b>SECURITY</b> then <b>FUNCTION</b>, just like a Bloomberg &lt;GO&gt; string.</p>
     <div class="sec-bar" style="position:static;margin:8px 0 4px">SECURITY FUNCTIONS</div>
@@ -988,6 +1015,14 @@ function init() {
   });
   cmd.addEventListener('blur', () => setTimeout(hideAC, 150));
   el('go-btn').addEventListener('click', () => { const v = cmd.value; cmd.value = ''; hideAC(); runCommand(v); cmd.focus(); });
+
+  // red function-bar action buttons (96/97/98), delegated since the bar re-renders
+  el('view').addEventListener('click', (e) => {
+    const btn = e.target.closest('.fn-act');
+    if (!btn) return;
+    if (btn.dataset.act === 'export') exportCSV();
+    else showHelp(); // ACTIONS / SETTINGS → command menu
+  });
 
   window.addEventListener('resize', () => { if (chartEl && el('chart')) resizeChart(); });
 
