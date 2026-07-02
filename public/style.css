@@ -43,6 +43,7 @@ html, body {
 }
 
 button { font-family: var(--mono); cursor: pointer; }
+.hidden { display: none !important; }
 
 /* --------------------------------------------------------------- topbar */
 
@@ -188,7 +189,7 @@ button { font-family: var(--mono); cursor: pointer; }
 .sec-func .n { color: var(--grey); margin-right: 3px; }
 .sec-func:hover { background: var(--line); }
 .sec-func.active { background: var(--orange); color: #000; }
-.sec-func.active .n { color: #000; }
+.sec-func.active .n, .sec-func.active .muted { color: #000 !important; }
 
 /* ---------------------------------------------------------------- view */
 
