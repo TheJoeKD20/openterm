@@ -1,0 +1,19 @@
+# Cloudflare Workers deployment for OpenTerm.
+#   npm i -g wrangler
+#   wrangler deploy                     # deploy the worker + static assets
+#   wrangler secret put FINNHUB_API_KEY # optional
+#
+# The Worker serves /api/* (see worker.js) and everything else from ./public
+# via the static-assets binding. Free plan is sufficient for personal use.
+
+name = "openterm"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Static frontend (public/) is served automatically for non-/api routes.
+assets = { directory = "./public", binding = "ASSETS" }
+
+# Optional: richer news/profiles. Prefer `wrangler secret put FINNHUB_API_KEY`.
+# [vars]
+# FINNHUB_API_KEY = ""

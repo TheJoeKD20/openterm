@@ -328,6 +328,73 @@ td.sym, .sym-cell { color: var(--orange); font-weight: bold; }
 .earn-lbl { font-size: 10px; color: var(--grey); }
 .earn-beat { font-size: 10px; }
 
+/* -------------------------------------------------------- sparklines */
+
+.spark-td { width: 72px; padding: 0 8px !important; }
+canvas.spark { display: block; vertical-align: middle; }
+
+/* --------------------------------------------------------- launchpad */
+
+.lp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 4px;
+  padding: 4px;
+  align-items: start;
+}
+.lp-panel { border: 1px solid var(--line); background: var(--bg-2); display: flex; flex-direction: column; min-width: 0; }
+.lp-panel.lp-wide { grid-column: 1 / -1; }
+.lp-head {
+  background: var(--orange); color: #000; font-weight: 800; font-size: 11px;
+  letter-spacing: 1px; padding: 2px 8px;
+}
+.lp-body { padding: 6px 8px; overflow-x: auto; }
+.lp-body.pad0 { padding: 0; }
+.lp-body table.data td { padding: 2px 8px; }
+
+/* world clocks */
+#lp-clocks { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.lp-clock { border: 1px solid var(--line-2); padding: 5px 8px; background: #05070f; }
+.lp-city { color: var(--grey); font-size: 10px; letter-spacing: 1px; }
+.lp-time { color: var(--amber); font-size: 20px; font-weight: bold; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.lp-wx { color: var(--cyan); font-size: 10.5px; }
+
+/* sector monitor bars */
+.sect-row { display: grid; grid-template-columns: 96px 1fr 54px; align-items: center; gap: 8px; padding: 2px 0; cursor: pointer; }
+.sect-row:hover { background: var(--sel); }
+.sect-name { color: var(--white); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sect-track { position: relative; height: 12px; background: #05070f; border-left: 1px solid var(--grey-2); }
+.sect-bar { position: absolute; top: 1px; bottom: 1px; }
+.sect-bar.pos { background: var(--green); }
+.sect-bar.neg { background: var(--red); }
+.sect-pct { text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; }
+
+/* ----------------------------------------------- financial statements */
+
+.fa-tabs { display: flex; gap: 1px; background: #05070f; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.fa-tabs::-webkit-scrollbar { display: none; }
+.fa-tab {
+  background: transparent; border: none; color: var(--white); font-weight: bold; font-size: 11.5px;
+  padding: 4px 12px; white-space: nowrap; border-bottom: 2px solid transparent;
+}
+.fa-tab .n { color: var(--grey); margin-right: 3px; }
+.fa-tab:hover { background: var(--line-2); }
+.fa-tab.active { background: var(--sel); color: #fff; border-bottom-color: var(--blue); }
+.fa-tab.active .n { color: var(--blue); }
+
+table.fin { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.fin th {
+  color: var(--amber); background: var(--bg-3); font-size: 10.5px; letter-spacing: 1px;
+  padding: 3px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; position: sticky; top: 0;
+}
+table.fin th.fin-unit { text-align: left; color: var(--grey); font-weight: normal; text-transform: none; letter-spacing: 0; }
+table.fin td { padding: 3px 10px; text-align: right; font-variant-numeric: tabular-nums; color: var(--gold); border-bottom: 1px dotted var(--line); white-space: nowrap; }
+table.fin td.neg { color: var(--red); }
+table.fin tr:hover td { background: rgba(255,255,255,0.03); }
+.fin-label { text-align: left !important; color: var(--white) !important; display: flex; align-items: center; gap: 7px; }
+.glyph { flex-shrink: 0; opacity: 0.9; }
+.glyph rect { fill: var(--blue); }
+
 /* ------------------------------------------------------------- news */
 
 .news-item { padding: 4px 2px; border-bottom: 1px solid var(--line-2); }
@@ -394,6 +461,8 @@ td.sym, .sym-cell { color: var(--orange); font-weight: bold; }
   #help-btn { display: none; }
   .grid-2 { grid-template-columns: 1fr; }
   .grid-2 > .section { border-right: none; }
+  .lp-grid { grid-template-columns: 1fr; }
+  .fa-tab { padding: 5px 10px; }
   #autocomplete { left: 6px; right: 6px; min-width: 0; width: auto; }
   #sec-symbol { font-size: 17px; }
   #sec-price { font-size: 17px; }

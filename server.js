@@ -452,6 +452,126 @@ app.get('/api/crypto', async (_req, res) => {
   } catch (err) { fail(res, err); }
 });
 
+/* ------------------------------------------------- sparklines (batch) */
+
+// One upstream call returns close arrays for many symbols — ideal for grids.
+app.get('/api/spark', async (req, res) => {
+  try {
+    const symbols = String(req.query.symbols || '')
+      .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 40).map(cleanSymbol);
+    if (!symbols.length) return res.json({});
+    const range = ['1d', '5d', '1mo', '3mo'].includes(req.query.range) ? req.query.range : '1d';
+    const interval = range === '1d' ? '5m' : range === '5d' ? '30m' : '1d';
+    const out = await cached(`spark:${range}:${symbols.join(',')}`, 60_000, async () => {
+      const url = `${YF}/v8/finance/spark?symbols=${encodeURIComponent(symbols.join(','))}&range=${range}&interval=${interval}`;
+      const data = await getJSON(url);
+      const result = {};
+      for (const sym of symbols) {
+        const s = data[sym];
+        if (!s || !s.close) continue;
+        const close = s.close.filter((v) => v != null);
+        const prev = s.chartPreviousClose ?? s.previousClose ?? close[0];
+        const last = close[close.length - 1];
+        result[sym] = { close, prev, last, changePct: prev ? ((last - prev) / prev) * 100 : 0 };
+      }
+      return result;
+    });
+    res.json(out);
+  } catch (err) { fail(res, err); }
+});
+
+/* ------------------------------------------------------------- weather */
+
+const WMO = { 0: 'Clear', 1: 'Clear', 2: 'P.Cloudy', 3: 'Cloudy', 45: 'Fog', 48: 'Fog', 51: 'Drizzle', 53: 'Drizzle', 55: 'Drizzle', 61: 'Rain', 63: 'Rain', 65: 'Heavy Rain', 71: 'Snow', 73: 'Snow', 75: 'Snow', 80: 'Showers', 81: 'Showers', 82: 'Showers', 95: 'Storm', 96: 'Storm', 99: 'Storm' };
+const CITIES = [
+  { name: 'NEW YORK', tz: 'America/New_York', lat: 40.71, lon: -74.01 },
+  { name: 'LONDON', tz: 'Europe/London', lat: 51.51, lon: -0.13 },
+  { name: 'HONG KONG', tz: 'Asia/Hong_Kong', lat: 22.32, lon: 114.17 },
+  { name: 'TOKYO', tz: 'Asia/Tokyo', lat: 35.68, lon: 139.65 },
+];
+
+app.get('/api/weather', async (_req, res) => {
+  try {
+    const data = await cached('weather', 900_000, async () => {
+      const lat = CITIES.map((c) => c.lat).join(',');
+      const lon = CITIES.map((c) => c.lon).join(',');
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&temperature_unit=fahrenheit`;
+      const arr = await getJSON(url);
+      const list = Array.isArray(arr) ? arr : [arr];
+      return CITIES.map((c, i) => ({
+        name: c.name, tz: c.tz,
+        temp: Math.round(list[i]?.current?.temperature_2m ?? 0),
+        cond: WMO[list[i]?.current?.weather_code] || '—',
+      }));
+    });
+    res.json(data);
+  } catch (err) { fail(res, err); }
+});
+
+/* -------------------------------------------------- multi-year financials */
+
+// Legacy quoteSummary statement modules were gutted; the current data lives in
+// the fundamentals-timeseries feed, keyed by "annual<Metric>" type names.
+const INCOME_ROWS = [
+  ['annualTotalRevenue', 'Revenue'], ['annualCostOfRevenue', 'Cost of Revenue'], ['annualGrossProfit', 'Gross Profit'],
+  ['annualResearchAndDevelopment', 'R&D'], ['annualSellingGeneralAndAdministration', 'SG&A'],
+  ['annualOperatingExpense', 'Operating Expense'], ['annualOperatingIncome', 'Operating Income'],
+  ['annualEBITDA', 'EBITDA'], ['annualEBIT', 'EBIT'], ['annualInterestExpense', 'Interest Expense'],
+  ['annualPretaxIncome', 'Pretax Income'], ['annualTaxProvision', 'Tax Provision'], ['annualNetIncome', 'Net Income'],
+  ['annualDilutedEPS', 'Diluted EPS'], ['annualBasicAverageShares', 'Avg Shares'],
+];
+const BALANCE_ROWS = [
+  ['annualCashAndCashEquivalents', 'Cash & Equivalents'], ['annualCashCashEquivalentsAndShortTermInvestments', 'Cash & ST Invest.'],
+  ['annualReceivables', 'Receivables'], ['annualInventory', 'Inventory'], ['annualCurrentAssets', 'Total Current Assets'],
+  ['annualNetPPE', 'Net PP&E'], ['annualGoodwill', 'Goodwill'], ['annualTotalAssets', 'Total Assets'],
+  ['annualCurrentLiabilities', 'Total Current Liab.'], ['annualLongTermDebt', 'Long-Term Debt'], ['annualTotalDebt', 'Total Debt'],
+  ['annualTotalLiabilitiesNetMinorityInterest', 'Total Liabilities'], ['annualRetainedEarnings', 'Retained Earnings'],
+  ['annualStockholdersEquity', 'Total Equity'],
+];
+const CASHFLOW_ROWS = [
+  ['annualOperatingCashFlow', 'Cash from Operations'], ['annualCapitalExpenditure', 'Capital Expenditure'],
+  ['annualFreeCashFlow', 'Free Cash Flow'], ['annualInvestingCashFlow', 'Cash from Investing'],
+  ['annualCashDividendsPaid', 'Dividends Paid'], ['annualRepurchaseOfCapitalStock', 'Stock Repurchased'],
+  ['annualFinancingCashFlow', 'Cash from Financing'], ['annualEndCashPosition', 'End Cash Position'],
+  ['annualChangesInCash', 'Net Change in Cash'],
+];
+const ALL_FIN_TYPES = [...INCOME_ROWS, ...BALANCE_ROWS, ...CASHFLOW_ROWS].map((r) => r[0]);
+
+app.get('/api/financials/:symbol', async (req, res) => {
+  try {
+    const symbol = cleanSymbol(req.params.symbol);
+    const data = await cached(`fin:${symbol}`, 3_600_000, async () => {
+      const url = `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}`
+        + `?symbol=${encodeURIComponent(symbol)}&type=${ALL_FIN_TYPES.join(',')}&period1=1230768000&period2=2000000000&merge=false`;
+      const json = await getAuthedJSON((crumb) => `${url}&crumb=${encodeURIComponent(crumb)}`);
+      const series = json.timeseries?.result || [];
+      const byType = {};
+      const yearSet = new Set();
+      for (const s of series) {
+        const type = s.meta?.type?.[0];
+        if (!type || !Array.isArray(s[type])) continue;
+        const m = {};
+        for (const pt of s[type]) {
+          if (!pt) continue;
+          const yr = (pt.asOfDate || '').slice(0, 4);
+          const val = pt.reportedValue?.raw;
+          if (yr && val != null) { m[yr] = val; yearSet.add(yr); }
+        }
+        byType[type] = m;
+      }
+      // keep the most recent years that actually carry data across the statements
+      const populated = [...yearSet].filter((y) => ALL_FIN_TYPES.some((t) => byType[t]?.[y] != null));
+      const years = populated.sort().reverse().slice(0, 4);
+      if (!years.length) throw new Error('no financial history available');
+      const rows = (spec) => spec
+        .map(([type, label]) => ({ label, values: years.map((y) => byType[type]?.[y] ?? null) }))
+        .filter((r) => r.values.some((v) => v != null));
+      return { symbol, years, income: rows(INCOME_ROWS), balance: rows(BALANCE_ROWS), cashflow: rows(CASHFLOW_ROWS) };
+    });
+    res.json(data);
+  } catch (err) { fail(res, err); }
+});
+
 app.get('/api/status', (_req, res) => {
   res.json({ ok: true, finnhub: Boolean(FINNHUB_KEY) });
 });

@@ -1,19 +1,19 @@
 <div align="center">
 
-# 🟠 OPENTERM
+<img src="public/logo.svg" alt="OpenTerm" width="440">
 
 ### A Bloomberg-Terminal-style market terminal, powered entirely by free APIs.
 
 Command-driven. Amber-on-black. Zero API keys required.
-Type `AAPL GP` and hit `GO`.
+Type `AAPL FA` and hit `GO`.
 
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Cloudflare](https://img.shields.io/badge/deploy-Cloudflare%20Workers-F38020?logo=cloudflare&logoColor=white)](#-deploy-to-cloudflare)
 [![License: MIT](https://img.shields.io/badge/license-MIT-ff7a00.svg)](LICENSE)
-[![Dependencies](https://img.shields.io/badge/deps-express%20%2B%20undici-informational)](package.json)
 [![API Keys](https://img.shields.io/badge/API%20keys-none%20required-33dd88)](#-data-sources)
-[![Build](https://img.shields.io/badge/build%20step-none-blue)](#-quick-start)
+[![Build](https://img.shields.io/badge/build%20step-none-4da6ff)](#-quick-start)
 
-<img src="docs/screenshot-home.png" alt="OpenTerm market monitor" width="100%">
+<img src="docs/screenshot-home.png" alt="OpenTerm Launchpad" width="100%">
 
 </div>
 
@@ -28,21 +28,21 @@ npm install
 npm start           # → http://localhost:8432
 ```
 
-That's the whole setup. **No keys, no build step, no database.** One `npm install`
-(just `express` + `undici`) and you're live.
+No keys, no build step, no database. One `npm install` (`express` + `undici`) and you're live.
 
 ---
 
 ## 🎯 Why
 
 Bloomberg charges ~$32,000/yr per terminal. This is a love letter to that
-interface — the amber command line, the solid-orange function bars, the
-color-coded keyboard — wired up to **free market data** instead. It won't get
-you Bloomberg chat or the FIGI graph, but for quotes, charts, fundamentals,
-movers, FX, rates, and crypto it feels like the real thing.
+interface — the amber command line, red function bars, color-coded keyboard,
+the Launchpad wall of data — wired up to **free market data**. It won't get you
+Bloomberg's proprietary feeds (chat, fixed-income analytics, L2), but for
+quotes, charts, multi-year fundamentals, movers, FX, rates, sectors, and crypto
+it gets remarkably close.
 
 It's a **command terminal, not a dashboard**: one full-screen function at a
-time, driven by `SECURITY FUNCTION` strings exactly like a real `<GO>` command.
+time, driven by `SECURITY FUNCTION` strings exactly like a real `<GO>`.
 
 ---
 
@@ -51,34 +51,41 @@ time, driven by `SECURITY FUNCTION` strings exactly like a real `<GO>` command.
 <table>
 <tr><td width="50%" valign="top">
 
-**📈 Securities**
-- `GP` / `GIP` — hand-rolled `<canvas>` charts: candles + line, volume, crosshair OHLC, 8 ranges (1D → MAX)
-- `DES` — full description & market data
-- `FA` — fundamentals: valuation, margins, balance sheet, analyst price-target bar, buy/hold/sell consensus
-- `ERN` — quarterly EPS surprise + annual revenue/earnings
-- `CN` — company news
+**🚀 Launchpad** (`HOME` / `LAUNCH`)
+- Tiled multi-panel workspace
+- Live **world clocks + weather** (NY / London / HK / Tokyo)
+- Major indices & movers with **inline sparklines**
+- **GICS sector-return monitor** bars
+- FX majors, commodities, global macro news
+
+**📊 Financial Analysis** (`FA`)
+- Tabbed **Overview / Income / Balance Sheet / Cash Flow / Ratios**
+- **Multi-year statements** with year columns, dotted leaders, row glyphs
+- Analyst price-target bar, buy/hold/sell consensus
 
 </td><td width="50%" valign="top">
 
+**📈 Securities**
+- `GP` / `GIP` — canvas candlestick/line charts, volume, crosshair OHLC, 1D→MAX
+- `DES` — description & market data
+- `ERN` — quarterly EPS surprise + annual trend
+- `CN` — company news
+
 **🌍 Market monitors**
-- `WEI` — world equity indices (Americas / EMEA / Asia-Pac)
-- `MOST` — movers: gainers, losers, most active
-- `CMDTY` — energy, metals, agriculture
-- `GOVT` — US Treasury yields & futures
-- `FX` — ECB reference currency rates
-- `CRYP` — top-25 crypto board
-- `W` — persistent watchlist
+- `WEI` world indices · `MOST` movers · `CMDTY` commodities
+- `GOVT` Treasury yields · `FX` currencies · `CRYP` crypto
+- `TOP` news · `W` watchlist · `S` finder
 
 </td></tr>
 </table>
 
-Plus a scrolling index tape, live news ticker, market-open indicator,
-ticker autocomplete, and a fully **responsive layout that collapses cleanly
-to mobile**.
+Sparklines throughout, scrolling index tape, live news ticker, market-open
+indicator, ticker autocomplete, CSV export of any table, and a **fully
+responsive layout** that collapses cleanly to mobile.
 
 <div align="center">
-<img src="docs/screenshot-fundamentals.png" alt="Fundamentals (FA)" width="49%">
-<img src="docs/screenshot-mobile.png" alt="Mobile view" width="24%">
+<img src="docs/screenshot-fundamentals.png" alt="Multi-year Financial Analysis" width="60%">
+<img src="docs/screenshot-mobile.png" alt="Mobile Launchpad" width="24%">
 </div>
 
 ---
@@ -87,26 +94,22 @@ to mobile**.
 
 | Command | Function |
 |---|---|
+| `HOME` / `LAUNCH` | Launchpad multi-panel workspace |
 | `AAPL` | Load a security (opens the price graph) |
 | `AAPL DES` | Description — profile, identification, market data |
 | `AAPL GP` / `GIP` | Price graph / intraday — candles, line, crosshair |
-| `AAPL FA` | Fundamentals — valuation, margins, targets, ratings |
+| `AAPL FA` | Financial analysis — overview + multi-year statements + ratios |
 | `AAPL ERN` | Earnings — quarterly surprise & annual trend |
 | `AAPL CN` | Company news |
-| `WEI` | World equity indices |
-| `MOST` | Market movers (gainers / losers / actives) |
-| `CMDTY` | Commodities board |
-| `GOVT` | US Treasury yields & futures |
-| `FX` | Currency rates (ECB) |
-| `CRYP` | Cryptocurrency market |
-| `TOP` | Top market news |
+| `WEI` · `MOST` · `CMDTY` · `GOVT` | World indices · movers · commodities · rates |
+| `FX` · `CRYP` · `TOP` | Currencies · crypto · top news |
 | `W` · `W ADD NVDA` · `W DEL NVDA` | Watchlist |
 | `S apple` | Security finder |
 | `HELP` | In-terminal command guide |
 
-Bare function codes (`GP`, `DES`, `FA`…) re-run against the loaded security.
-Symbols follow Yahoo conventions: indices `^GSPC`, FX `EURUSD=X`, futures
-`GC=F`, crypto `BTC-USD`, non-US `BMW.DE` / `7203.T`.
+The red function bar's `97) EXPORT` downloads the current table as CSV.
+Symbols use Yahoo conventions: indices `^GSPC`, FX `EURUSD=X`, futures `GC=F`,
+crypto `BTC-USD`, non-US `BMW.DE` / `7203.T`.
 
 ---
 
@@ -114,65 +117,66 @@ Symbols follow Yahoo conventions: indices `^GSPC`, FX `EURUSD=X`, futures
 
 | Source | Powers | Cost | Key? |
 |---|---|---|:--:|
-| [Yahoo Finance](https://finance.yahoo.com) *(unofficial)* | Quotes, charts, search, movers, **fundamentals**, news | Free | ❌ |
+| [Yahoo Finance](https://finance.yahoo.com) *(unofficial)* | Quotes, charts, sparklines, search, movers, **multi-year financials**, news | Free | ❌ |
 | [CoinGecko](https://www.coingecko.com/en/api) | Crypto board | Free | ❌ |
 | [Frankfurter / ECB](https://frankfurter.dev) | FX rates | Free | ❌ |
-| [Finnhub](https://finnhub.io) *(optional)* | Richer news & profiles | Free tier (60/min) | ✅ |
+| [Open-Meteo](https://open-meteo.com) | Launchpad weather | Free | ❌ |
+| [Finnhub](https://finnhub.io) *(optional)* | Richer news & profiles | Free tier | ✅ |
 
-Everything runs keyless. Add a **free** Finnhub key only if you want upgraded
-news/profiles:
+Everything runs keyless. Add a free Finnhub key for upgraded news/profiles:
 
 ```bash
 FINNHUB_API_KEY=your_key_here npm start
 ```
 
-Keys stay **server-side** — the browser only ever talks to this app's own
-`/api/*` endpoints. An in-memory TTL cache (10s quotes · 60s charts/movers ·
-2min news · 10min fundamentals) keeps request volume well inside free limits.
+Keys stay **server-side** — the browser only talks to this app's own `/api/*`.
+An in-memory TTL cache (10s quotes · 60s charts/sparks/movers · 10min
+fundamentals) keeps request volume inside free limits, and the server manages
+Yahoo's cookie+crumb session to unlock the fundamentals feeds.
 
-<details>
-<summary><b>💸 Cheap monthly upgrade paths, if you outgrow the free tiers</b></summary>
+---
 
-They slot into the same server-side proxy layer:
+## ☁️ Deploy to Cloudflare
 
-| Provider | Free tier | Paid from | Adds |
-|---|---|---|---|
-| **Twelve Data** | 800 req/day | ~$29/mo | WebSocket streaming |
-| **Polygon.io** | End-of-day | ~$29/mo | 15-min delayed, unlimited calls |
-| **Financial Modeling Prep** | 250 req/day | ~$22/mo | Deep fundamentals, earnings |
-| **Finnhub** | 60 req/min | ~$50/mo | Real-time, higher limits |
-| **Alpha Vantage** | 25 req/day | ~$50/mo | Broad coverage |
+OpenTerm ships a Cloudflare Worker (`worker.js`) that serves both the API and
+the static frontend — host it globally on Cloudflare's free plan:
 
-</details>
+```bash
+npm i -g wrangler
+wrangler deploy                      # deploys worker + public/ assets
+wrangler secret put FINNHUB_API_KEY  # optional
+```
+
+The Worker serves `/api/*` and everything else from `public/` via the static
+assets binding (see `wrangler.toml`). Self-hosting via `npm start` (Node) works
+identically — same endpoints, same UI.
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-browser (public/)                    server.js (Express + undici)         upstream
-┌──────────────────────────┐        ┌───────────────────────────┐
-│ index.html               │  /api  │ /api/quote · /api/quotes  │──► Yahoo Finance
-│ style.css   (Bloomberg   │ ─────► │ /api/history              │──► Yahoo Finance
-│ app.js       look)       │        │ /api/summary  (crumb auth)│──► Yahoo Finance
-│  • command parser        │        │ /api/movers · /api/search │──► Yahoo Finance
-│  • canvas chart engine   │        │ /api/news · /api/profile  │──► Finnhub / Yahoo
-│  • 13 functions          │        │ /api/fx                   │──► Frankfurter (ECB)
-│  • localStorage watchlist│        │ /api/crypto               │──► CoinGecko
-└──────────────────────────┘        │ + TTL cache · key hiding  │
-                                     └───────────────────────────┘
+browser (public/)                    proxy (server.js  ·  worker.js)      upstream
+┌──────────────────────────┐        ┌────────────────────────────┐
+│ index.html               │  /api  │ quote · quotes · history   │──► Yahoo Finance
+│ style.css   (Bloomberg   │ ─────► │ spark · search · movers    │──► Yahoo Finance
+│ app.js       look)       │        │ summary · financials       │──► Yahoo (crumb)
+│  • command parser        │        │ news · profile             │──► Finnhub / Yahoo
+│  • canvas chart + sparks │        │ fx                         │──► Frankfurter (ECB)
+│  • 14 functions          │        │ crypto                     │──► CoinGecko
+│  • localStorage watchlist│        │ weather                    │──► Open-Meteo
+└──────────────────────────┘        │ + TTL cache · key hiding   │
+                                     └────────────────────────────┘
+        Node (Express + undici)  —or—  Cloudflare Worker (native fetch)
 ```
 
-- **No frontend dependencies** — vanilla JS/CSS, charts drawn on raw `<canvas>`.
+- **No frontend dependencies** — vanilla JS/CSS, charts & sparklines on raw `<canvas>`.
 - **No build step** — edit a file, refresh.
-- Server manages Yahoo's cookie+crumb session to unlock the fundamentals feed,
-  honors `HTTPS_PROXY` / `NO_PROXY`, and normalizes every source behind one API.
-
-**Configuration**
+- **Two runtimes, one codebase** — `server.js` (Node) and `worker.js` (Cloudflare) expose identical APIs.
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `PORT` | `8432` | HTTP port |
+| `PORT` | `8432` | HTTP port (Node) |
 | `FINNHUB_API_KEY` | *(unset)* | Optional — richer news/profiles |
 
 ---

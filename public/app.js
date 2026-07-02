@@ -52,6 +52,50 @@ function fmtDate(u) {
   return new Date(u * 1000).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/* ---------------------------------------------------------- sparklines */
+
+const GLYPH = '<svg class="glyph" viewBox="0 0 12 10" width="11" height="9"><rect x="0" y="5" width="2.4" height="5"/><rect x="4" y="1" width="2.4" height="9"/><rect x="8" y="6" width="2.4" height="4"/></svg>';
+
+function sparkCell(sym, w = 66, h = 20) {
+  return `<canvas class="spark" data-sym="${esc(sym)}" width="${w * 2}" height="${h * 2}" style="width:${w}px;height:${h}px"></canvas>`;
+}
+
+function drawSpark(canvas, closes, prev) {
+  const cx = canvas.getContext('2d');
+  const dpr = 2, W = canvas.width / dpr, H = canvas.height / dpr;
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cx.clearRect(0, 0, W, H);
+  if (!closes || closes.length < 2) return;
+  let lo = Math.min(...closes), hi = Math.max(...closes);
+  if (prev != null) { lo = Math.min(lo, prev); hi = Math.max(hi, prev); }
+  const pad = (hi - lo) * 0.12 || Math.abs(hi) * 0.01 || 1;
+  lo -= pad; hi += pad;
+  const x = (i) => (i / (closes.length - 1)) * (W - 1) + 0.5;
+  const y = (v) => H - ((v - lo) / (hi - lo)) * (H - 2) - 1;
+  const up = closes[closes.length - 1] >= (prev ?? closes[0]);
+  if (prev != null) {
+    cx.strokeStyle = 'rgba(140,146,166,0.4)'; cx.setLineDash([2, 2]);
+    cx.beginPath(); cx.moveTo(0, y(prev)); cx.lineTo(W, y(prev)); cx.stroke(); cx.setLineDash([]);
+  }
+  cx.beginPath();
+  closes.forEach((v, i) => (i ? cx.lineTo(x(i), y(v)) : cx.moveTo(x(i), y(v))));
+  cx.strokeStyle = up ? '#33dd88' : '#ff4b4b'; cx.lineWidth = 1.2; cx.stroke();
+  cx.lineTo(x(closes.length - 1), H); cx.lineTo(x(0), H); cx.closePath();
+  cx.fillStyle = up ? 'rgba(51,221,136,0.14)' : 'rgba(255,75,75,0.14)'; cx.fill();
+}
+
+async function fillSparks(container, range = '1d') {
+  const canvases = [...container.querySelectorAll('canvas.spark')];
+  const syms = [...new Set(canvases.map((c) => c.dataset.sym))];
+  if (!syms.length) return;
+  let data = {};
+  try { data = await api(`/api/spark?symbols=${encodeURIComponent(syms.join(','))}&range=${range}`); } catch { return; }
+  for (const c of canvases) {
+    const d = data[c.dataset.sym];
+    if (d) drawSpark(c, d.close, d.prev);
+  }
+}
+
 /* -------------------------------------------------------------- state */
 
 const state = {
@@ -125,6 +169,7 @@ function tickClock() {
   s.classList.toggle('open', open);
   s.classList.toggle('closed', !open);
   el('mkt-status-text').textContent = open ? 'US OPEN' : 'US CLOSED';
+  if (state.view === 'LAUNCH') renderLpClocks();
 }
 
 /* ------------------------------------------------------- view render */
@@ -429,87 +474,158 @@ async function showDES() {
 
 /* ----------------------------------------------------------------- FA */
 
-async function showFA() {
+const FA_TABS = [['overview', 'OVERVIEW'], ['income', 'INCOME STMT'], ['balance', 'BALANCE SHEET'], ['cashflow', 'CASH FLOW'], ['ratios', 'RATIOS']];
+const faCache = { symbol: null, tab: 'overview', summary: null, fin: null };
+
+function showFA() {
   if (!state.symbol) { msg('Load a security first', true); return; }
   setActiveTabs(null);
-  el('view').innerHTML = fnBar('FINANCIAL ANALYSIS', 'FA', state.symbol) +
-    `<div class="sec-body"><div class="loading">Loading fundamentals…</div></div>`;
-  const body = el('view').querySelector('.sec-body');
+  if (faCache.symbol !== state.symbol) { faCache.symbol = state.symbol; faCache.tab = 'overview'; faCache.summary = null; faCache.fin = null; }
+  renderFAShell();
+  loadFATab();
+}
+
+function renderFAShell() {
+  el('view').innerHTML = fnBar('FINANCIAL ANALYSIS', 'FA', state.symbol)
+    + `<div class="fa-tabs">${FA_TABS.map(([k, l], i) =>
+        `<button class="fa-tab ${k === faCache.tab ? 'active' : ''}" data-tab="${k}"><span class="n">${i + 1})</span>${l}</button>`).join('')}</div>`
+    + `<div id="fa-body"><div class="loading">Loading…</div></div>`;
+  el('view').querySelectorAll('.fa-tab').forEach((b) =>
+    b.addEventListener('click', () => { faCache.tab = b.dataset.tab; renderFAShell(); loadFATab(); }));
+}
+
+async function loadFATab() {
+  const body = el('fa-body');
   try {
-    const s = await api(`/api/summary/${encodeURIComponent(state.symbol)}`);
-    const kv = (k, v, hl) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${hl ? 'hl' : ''}">${v}</span></div>`;
-    const recKey = (s.recommendationKey || '').toLowerCase();
-    const recCls = /buy/.test(recKey) ? 'rec-buy' : /sell|underperform/.test(recKey) ? 'rec-sell' : 'rec-hold';
-    const q = state.quote || {};
-    // analyst target bar
-    let tgt = '';
-    if (s.targetLow && s.targetHigh && q.price) {
-      const lo = Math.min(s.targetLow, q.price), hi = Math.max(s.targetHigh, q.price);
-      const span = hi - lo || 1;
-      const pos = (v) => `${((v - lo) / span) * 100}%`;
-      tgt = `
-        <div class="sec-bar" style="position:static;margin:8px 0 4px">ANALYST PRICE TARGET</div>
-        <div class="tgt-bar">
-          <div class="tgt-range" style="left:${pos(s.targetLow)};right:${100 - parseFloat(pos(s.targetHigh))}%"></div>
-          <div class="tgt-mark cur" style="left:${pos(q.price)}"><span class="tgt-label">Now ${fmtPrice(q.price)}</span></div>
-          <div class="tgt-mark mean" style="left:${pos(s.targetMean)}"><span class="tgt-label" style="top:auto;bottom:100%">Tgt ${fmtPrice(s.targetMean)}</span></div>
-        </div>
-        <div class="kv-grid" style="margin-top:14px">
-          ${kv('Mean Target', fmtPrice(s.targetMean), true)}
-          ${kv('High / Low', `${fmtPrice(s.targetHigh)} / ${fmtPrice(s.targetLow)}`)}
-          ${kv('Upside', `<span class="${chgClass(s.targetMean - q.price)}">${fmtPct(((s.targetMean - q.price) / q.price) * 100)}</span>`)}
-          ${kv('# Analysts', fmtRatio(s.numberOfAnalysts, 0))}
-        </div>`;
+    if (faCache.tab === 'overview') {
+      if (!faCache.summary) faCache.summary = await api(`/api/summary/${encodeURIComponent(state.symbol)}`);
+      renderFAOverview(faCache.summary, body);
+    } else {
+      if (!faCache.fin) faCache.fin = await api(`/api/financials/${encodeURIComponent(state.symbol)}`);
+      if (faCache.tab === 'ratios') renderFARatios(faCache.fin, body);
+      else renderStatement(faCache.fin, faCache.tab, body);
     }
-    body.innerHTML = `
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">
-        <span class="rec-badge ${recCls}">${esc((s.recommendationKey || 'n/a').toUpperCase())}</span>
-        <span class="muted">Consensus rating${s.recommendationMean != null ? ` · score ${fmtRatio(s.recommendationMean)}/5 (1=Strong Buy)` : ''}</span>
-      </div>
-      <div class="sec-bar" style="position:static;margin:4px 0">VALUATION</div>
-      <div class="kv-grid">
-        ${kv('Market Cap', fmtBig(s.marketCap), true)}
-        ${kv('P/E (TTM)', fmtRatio(s.peTrailing))}
-        ${kv('P/E (Fwd)', fmtRatio(s.peForward))}
-        ${kv('PEG Ratio', fmtRatio(s.pegRatio))}
-        ${kv('Price/Book', fmtRatio(s.priceToBook))}
-        ${kv('EPS (TTM)', fmtPrice(s.eps))}
-        ${kv('Beta', fmtRatio(s.beta))}
-        ${kv('Div Yield', s.dividendYield ? fmtPct(s.dividendYield * 100) : '—')}
-        ${kv('Div Rate', s.dividendRate ? fmtPrice(s.dividendRate) : '—')}
-        ${kv('Payout Ratio', s.payoutRatio ? fmtPct(s.payoutRatio * 100) : '—')}
-      </div>
-      <div class="sec-bar" style="position:static;margin:8px 0 4px">PROFITABILITY & GROWTH</div>
-      <div class="kv-grid">
-        ${kv('Revenue (TTM)', fmtBig(s.revenue), true)}
-        ${kv('Rev Growth', s.revenueGrowth != null ? `<span class="${chgClass(s.revenueGrowth)}">${fmtPct(s.revenueGrowth * 100)}</span>` : '—')}
-        ${kv('Earnings Growth', s.earningsGrowth != null ? `<span class="${chgClass(s.earningsGrowth)}">${fmtPct(s.earningsGrowth * 100)}</span>` : '—')}
-        ${kv('Gross Margin', s.grossMargin != null ? fmtPct(s.grossMargin * 100) : '—')}
-        ${kv('Oper Margin', s.operatingMargin != null ? fmtPct(s.operatingMargin * 100) : '—')}
-        ${kv('Profit Margin', s.profitMargin != null ? fmtPct(s.profitMargin * 100) : '—')}
-        ${kv('ROE', s.roe != null ? fmtPct(s.roe * 100) : '—')}
-        ${kv('ROA', s.roa != null ? fmtPct(s.roa * 100) : '—')}
-        ${kv('EBITDA', fmtBig(s.ebitda))}
-        ${kv('Free Cash Flow', fmtBig(s.freeCashflow))}
-      </div>
-      <div class="sec-bar" style="position:static;margin:8px 0 4px">BALANCE SHEET & OWNERSHIP</div>
-      <div class="kv-grid">
-        ${kv('Total Cash', fmtBig(s.totalCash))}
-        ${kv('Total Debt', fmtBig(s.totalDebt))}
-        ${kv('Debt/Equity', fmtRatio(s.debtToEquity))}
-        ${kv('Current Ratio', fmtRatio(s.currentRatio))}
-        ${kv('Shares Out', fmtBig(s.sharesOut))}
-        ${kv('Float', fmtBig(s.floatShares))}
-        ${kv('% Insiders', s.heldPctInsiders != null ? fmtPct(s.heldPctInsiders * 100) : '—')}
-        ${kv('% Institutions', s.heldPctInstitutions != null ? fmtPct(s.heldPctInstitutions * 100) : '—')}
-        ${kv('Short % Float', s.shortPctFloat != null ? fmtPct(s.shortPctFloat * 100) : '—')}
-        ${kv('Next Earnings', fmtDate(s.nextEarningsDate))}
-      </div>
-      ${tgt}`;
   } catch (err) {
-    body.innerHTML = `<div class="err">Fundamentals unavailable: ${esc(err.message)}</div>
-      <div class="muted" style="padding:8px">Yahoo's fundamentals endpoint requires a session token that can rate-limit. Try again shortly, or add a Finnhub key for an alternate source.</div>`;
+    body.innerHTML = `<div class="err">Unavailable: ${esc(err.message)}</div>
+      <div class="muted" style="padding:8px">Yahoo's fundamentals feed needs a session token that can rate-limit. Try again shortly.</div>`;
   }
+}
+
+function fmtFin(v, label) {
+  if (v == null) return '—';
+  if (/EPS/.test(label)) return fmtNum(v, 2);
+  return fmtBig(v);
+}
+
+function statementTable(years, rows, unit) {
+  return `<div class="tbl-wrap"><table class="fin">
+    <tr><th class="fin-unit">${esc(unit)}</th>${years.map((y) => `<th class="num">FY${esc(y)}</th>`).join('')}</tr>
+    ${rows.map((r) => `<tr>
+      <td class="fin-label">${GLYPH}<span>${esc(r.label)}</span></td>
+      ${r.values.map((v) => `<td class="num ${v < 0 ? 'neg' : ''}">${r.fmt ? r.fmt(v) : fmtFin(v, r.label)}</td>`).join('')}
+    </tr>`).join('')}
+  </table></div>`;
+}
+
+function renderStatement(fin, which, body) {
+  if (!fin[which] || !fin[which].length) { body.innerHTML = '<div class="muted" style="padding:12px">No data for this statement.</div>'; return; }
+  const title = { income: 'INCOME STATEMENT', balance: 'BALANCE SHEET', cashflow: 'STATEMENT OF CASH FLOWS' }[which];
+  body.innerHTML = secBar(title, `${fin.symbol} · annual`) + statementTable(fin.years, fin[which], 'Reported currency · scaled');
+}
+
+function renderFARatios(fin, body) {
+  const find = (arr, label) => (arr.find((r) => r.label === label) || {}).values || [];
+  const rev = find(fin.income, 'Revenue'), gp = find(fin.income, 'Gross Profit'),
+    oi = find(fin.income, 'Operating Income'), ni = find(fin.income, 'Net Income');
+  const ta = find(fin.balance, 'Total Assets'), te = find(fin.balance, 'Total Equity'), td = find(fin.balance, 'Total Debt');
+  const fcf = find(fin.cashflow, 'Free Cash Flow');
+  const pct = (a, b) => (a != null && b ? (a / b) * 100 : null);
+  const ratioRow = (label, fn, fmt) => ({ label, values: fin.years.map((_, i) => fn(i)), fmt });
+  const asPct = (v) => (v == null ? '—' : fmtNum(v, 1) + '%');
+  const asRatio = (v) => (v == null ? '—' : fmtNum(v, 2));
+  const rows = [
+    ratioRow('Gross Margin', (i) => pct(gp[i], rev[i]), asPct),
+    ratioRow('Operating Margin', (i) => pct(oi[i], rev[i]), asPct),
+    ratioRow('Net Margin', (i) => pct(ni[i], rev[i]), asPct),
+    ratioRow('FCF Margin', (i) => pct(fcf[i], rev[i]), asPct),
+    ratioRow('Return on Assets', (i) => pct(ni[i], ta[i]), asPct),
+    ratioRow('Return on Equity', (i) => pct(ni[i], te[i]), asPct),
+    ratioRow('Debt / Equity', (i) => (te[i] ? td[i] / te[i] : null), asRatio),
+    ratioRow('Revenue Growth', (i) => (rev[i + 1] ? ((rev[i] - rev[i + 1]) / Math.abs(rev[i + 1])) * 100 : null), asPct),
+    ratioRow('Net Income Growth', (i) => (ni[i + 1] ? ((ni[i] - ni[i + 1]) / Math.abs(ni[i + 1])) * 100 : null), asPct),
+  ];
+  body.innerHTML = secBar('KEY RATIOS', `${fin.symbol} · annual`) + statementTable(fin.years, rows, 'Derived ratios');
+}
+
+function renderFAOverview(s, body) {
+  const kv = (k, v, hl) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${hl ? 'hl' : ''}">${v}</span></div>`;
+  const recKey = (s.recommendationKey || '').toLowerCase();
+  const recCls = /buy/.test(recKey) ? 'rec-buy' : /sell|underperform/.test(recKey) ? 'rec-sell' : 'rec-hold';
+  const q = state.quote || {};
+  let tgt = '';
+  if (s.targetLow && s.targetHigh && q.price) {
+    const lo = Math.min(s.targetLow, q.price), hi = Math.max(s.targetHigh, q.price);
+    const span = hi - lo || 1;
+    const pos = (v) => `${((v - lo) / span) * 100}%`;
+    tgt = `
+      <div class="sec-bar" style="position:static;margin:8px 0 4px">ANALYST PRICE TARGET</div>
+      <div class="tgt-bar">
+        <div class="tgt-range" style="left:${pos(s.targetLow)};right:${100 - parseFloat(pos(s.targetHigh))}%"></div>
+        <div class="tgt-mark cur" style="left:${pos(q.price)}"><span class="tgt-label">Now ${fmtPrice(q.price)}</span></div>
+        <div class="tgt-mark mean" style="left:${pos(s.targetMean)}"><span class="tgt-label" style="top:auto;bottom:100%">Tgt ${fmtPrice(s.targetMean)}</span></div>
+      </div>
+      <div class="kv-grid" style="margin-top:14px">
+        ${kv('Mean Target', fmtPrice(s.targetMean), true)}
+        ${kv('High / Low', `${fmtPrice(s.targetHigh)} / ${fmtPrice(s.targetLow)}`)}
+        ${kv('Upside', `<span class="${chgClass(s.targetMean - q.price)}">${fmtPct(((s.targetMean - q.price) / q.price) * 100)}</span>`)}
+        ${kv('# Analysts', fmtRatio(s.numberOfAnalysts, 0))}
+      </div>`;
+  }
+  body.innerHTML = `<div class="sec-body">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">
+      <span class="rec-badge ${recCls}">${esc((s.recommendationKey || 'n/a').toUpperCase())}</span>
+      <span class="muted">Consensus rating${s.recommendationMean != null ? ` · score ${fmtRatio(s.recommendationMean)}/5 (1=Strong Buy)` : ''}</span>
+    </div>
+    <div class="sec-bar" style="position:static;margin:4px 0">VALUATION</div>
+    <div class="kv-grid">
+      ${kv('Market Cap', fmtBig(s.marketCap), true)}
+      ${kv('P/E (TTM)', fmtRatio(s.peTrailing))}
+      ${kv('P/E (Fwd)', fmtRatio(s.peForward))}
+      ${kv('PEG Ratio', fmtRatio(s.pegRatio))}
+      ${kv('Price/Book', fmtRatio(s.priceToBook))}
+      ${kv('EPS (TTM)', fmtPrice(s.eps))}
+      ${kv('Beta', fmtRatio(s.beta))}
+      ${kv('Div Yield', s.dividendYield ? fmtPct(s.dividendYield * 100) : '—')}
+      ${kv('Div Rate', s.dividendRate ? fmtPrice(s.dividendRate) : '—')}
+      ${kv('Payout Ratio', s.payoutRatio ? fmtPct(s.payoutRatio * 100) : '—')}
+    </div>
+    <div class="sec-bar" style="position:static;margin:8px 0 4px">PROFITABILITY & GROWTH</div>
+    <div class="kv-grid">
+      ${kv('Revenue (TTM)', fmtBig(s.revenue), true)}
+      ${kv('Rev Growth', s.revenueGrowth != null ? `<span class="${chgClass(s.revenueGrowth)}">${fmtPct(s.revenueGrowth * 100)}</span>` : '—')}
+      ${kv('Earnings Growth', s.earningsGrowth != null ? `<span class="${chgClass(s.earningsGrowth)}">${fmtPct(s.earningsGrowth * 100)}</span>` : '—')}
+      ${kv('Gross Margin', s.grossMargin != null ? fmtPct(s.grossMargin * 100) : '—')}
+      ${kv('Oper Margin', s.operatingMargin != null ? fmtPct(s.operatingMargin * 100) : '—')}
+      ${kv('Profit Margin', s.profitMargin != null ? fmtPct(s.profitMargin * 100) : '—')}
+      ${kv('ROE', s.roe != null ? fmtPct(s.roe * 100) : '—')}
+      ${kv('ROA', s.roa != null ? fmtPct(s.roa * 100) : '—')}
+      ${kv('EBITDA', fmtBig(s.ebitda))}
+      ${kv('Free Cash Flow', fmtBig(s.freeCashflow))}
+    </div>
+    <div class="sec-bar" style="position:static;margin:8px 0 4px">BALANCE SHEET & OWNERSHIP</div>
+    <div class="kv-grid">
+      ${kv('Total Cash', fmtBig(s.totalCash))}
+      ${kv('Total Debt', fmtBig(s.totalDebt))}
+      ${kv('Debt/Equity', fmtRatio(s.debtToEquity))}
+      ${kv('Current Ratio', fmtRatio(s.currentRatio))}
+      ${kv('Shares Out', fmtBig(s.sharesOut))}
+      ${kv('Float', fmtBig(s.floatShares))}
+      ${kv('% Insiders', s.heldPctInsiders != null ? fmtPct(s.heldPctInsiders * 100) : '—')}
+      ${kv('% Institutions', s.heldPctInstitutions != null ? fmtPct(s.heldPctInstitutions * 100) : '—')}
+      ${kv('Short % Float', s.shortPctFloat != null ? fmtPct(s.shortPctFloat * 100) : '—')}
+      ${kv('Next Earnings', fmtDate(s.nextEarningsDate))}
+    </div>
+    ${tgt}</div>`;
 }
 
 /* ---------------------------------------------------------------- ERN */
@@ -597,16 +713,18 @@ async function quoteBoard(symbols) {
 function boardTable(rows, byName, opts = {}) {
   const extraHead = opts.extraHead || '';
   const extraCell = opts.extraCell || (() => '');
+  const spark = opts.spark !== false;
   return `<div class="tbl-wrap"><table class="data">
-    <tr><th>NAME</th><th class="num">LAST</th><th class="num">CHG</th><th class="num">CHG%</th>${extraHead}</tr>
+    <tr><th>NAME</th><th class="num">LAST</th><th class="num">CHG</th><th class="num">CHG%</th>${spark ? '<th>1D</th>' : ''}${extraHead}</tr>
     ${rows.map(([sym, label]) => {
       const q = byName[sym];
-      if (!q || q.error) return `<tr><td>${esc(label)}</td><td class="num muted" colspan="3">n/a</td>${extraCell(null)}</tr>`;
+      if (!q || q.error) return `<tr><td>${esc(label)}</td><td class="num muted" colspan="${spark ? 4 : 3}">n/a</td>${extraCell(null)}</tr>`;
       return `<tr class="click" data-sym="${esc(sym)}">
         <td><span class="sym-cell">${esc(label)}</span></td>
         <td class="num">${fmtPrice(q.price)}</td>
         <td class="num ${chgClass(q.change)}">${arrow(q.change)} ${fmtNum(Math.abs(q.change))}</td>
         <td class="num ${chgClass(q.change)}">${fmtNum(Math.abs(q.changePct))}%</td>
+        ${spark ? `<td class="spark-td">${sparkCell(sym)}</td>` : ''}
         ${extraCell(q)}
       </tr>`;
     }).join('')}
@@ -614,8 +732,9 @@ function boardTable(rows, byName, opts = {}) {
 }
 
 function wireRows(container) {
-  container.querySelectorAll('tr.click[data-sym]').forEach((tr) =>
-    tr.addEventListener('click', () => loadSecurity(tr.dataset.sym, 'GP')));
+  container.querySelectorAll('.click[data-sym]').forEach((row) =>
+    row.addEventListener('click', () => loadSecurity(row.dataset.sym, 'GP')));
+  fillSparks(container); // fire-and-forget; draws into any .spark canvases
 }
 
 /* -------------------------------------------------------- WEI (world) */
@@ -674,12 +793,13 @@ async function showMovers(type) {
   try {
     const data = await api(`/api/movers?type=${moversType}`);
     el('mv-body').innerHTML = `<div class="tbl-wrap"><table class="data">
-      <tr><th>SYM</th><th>NAME</th><th class="num">LAST</th><th class="num">CHG</th><th class="num">CHG%</th><th class="num">VOLUME</th><th class="num">MKT CAP</th></tr>
+      <tr><th>SYM</th><th>NAME</th><th class="num">LAST</th><th class="num">CHG</th><th class="num">CHG%</th><th>1D</th><th class="num">VOLUME</th><th class="num">MKT CAP</th></tr>
       ${data.rows.map((r) => `<tr class="click" data-sym="${esc(r.symbol)}">
         <td class="sym">${esc(r.symbol)}</td><td class="muted">${esc((r.name || '').slice(0, 32))}</td>
         <td class="num">${fmtPrice(r.price)}</td>
         <td class="num ${chgClass(r.change)}">${arrow(r.change)} ${fmtNum(Math.abs(r.change))}</td>
         <td class="num ${chgClass(r.change)}">${fmtNum(Math.abs(r.changePct))}%</td>
+        <td class="spark-td">${sparkCell(r.symbol)}</td>
         <td class="num">${fmtBig(r.volume)}</td><td class="num">${fmtBig(r.marketCap)}</td>
       </tr>`).join('')}
     </table></div>`;
@@ -740,14 +860,15 @@ async function showWatchlist() {
   try {
     const quotes = await api(`/api/quotes?symbols=${encodeURIComponent(state.watchlist.join(','))}`);
     el('wl-body').innerHTML = `<div class="tbl-wrap"><table class="data">
-      <tr><th>SYM</th><th>NAME</th><th class="num">LAST</th><th class="num">CHG</th><th class="num">CHG%</th><th class="num">VOLUME</th><th></th></tr>
+      <tr><th>SYM</th><th>NAME</th><th class="num">LAST</th><th class="num">CHG</th><th class="num">CHG%</th><th>1D</th><th class="num">VOLUME</th><th></th></tr>
       ${quotes.map((q) => q.error
-        ? `<tr><td class="sym">${esc(q.symbol)}</td><td class="neg" colspan="6">unavailable</td></tr>`
+        ? `<tr><td class="sym">${esc(q.symbol)}</td><td class="neg" colspan="7">unavailable</td></tr>`
         : `<tr class="click" data-sym="${esc(q.symbol)}">
             <td class="sym">${esc(q.symbol)}</td><td class="muted">${esc((q.name || '').slice(0, 30))}</td>
             <td class="num">${fmtPrice(q.price)}</td>
             <td class="num ${chgClass(q.change)}">${arrow(q.change)} ${fmtNum(Math.abs(q.change))}</td>
             <td class="num ${chgClass(q.change)}">${fmtNum(Math.abs(q.changePct))}%</td>
+            <td class="spark-td">${sparkCell(q.symbol)}</td>
             <td class="num">${fmtBig(q.volume)}</td>
             <td class="num"><button class="wl-del" data-del="${esc(q.symbol)}" style="background:transparent;border:1px solid var(--line);color:var(--red);font-size:10px;padding:0 6px">✕</button></td>
           </tr>`).join('')}
@@ -780,41 +901,70 @@ async function showSearch(query) {
   } catch (err) { el('sf-body').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 
-/* ---------------------------------------------------------------- HOME */
+/* --------------------------------------------------------- LAUNCHPAD */
 
-async function showHome() {
-  state.view = 'HOME'; setActiveTabs('HOME'); markFunc(null);
-  el('view').innerHTML = `
-    <div class="grid-2">
-      <div class="section" id="home-idx">${secBar('WEI — WORLD INDICES')}<div class="sec-body" style="padding:0"><div class="loading">Loading…</div></div></div>
-      <div class="section" id="home-mov">${secBar('MOST — TOP GAINERS')}<div class="sec-body" style="padding:0"><div class="loading">Loading…</div></div></div>
-    </div>
-    <div class="grid-2">
-      <div class="section" id="home-cmdty">${secBar('CMDTY — COMMODITIES & RATES')}<div class="sec-body" style="padding:0"><div class="loading">Loading…</div></div></div>
-      <div class="section" id="home-news">${secBar('TOP — MARKET NEWS')}<div class="sec-body"><div class="loading">Loading…</div></div></div>
-    </div>`;
-  // world indices (headline set)
-  const idxRows = [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq'], ['^DJI', 'Dow Jones'], ['^RUT', 'Russell 2000'],
-    ['^FTSE', 'FTSE 100'], ['^GDAXI', 'DAX'], ['^N225', 'Nikkei 225'], ['^HSI', 'Hang Seng'], ['^VIX', 'VIX']];
-  const cmdtyRows = [['GC=F', 'Gold'], ['SI=F', 'Silver'], ['CL=F', 'WTI Crude'], ['BZ=F', 'Brent'],
-    ['NG=F', 'Nat Gas'], ['HG=F', 'Copper'], ['^TNX', 'US 10Y Yield'], ['^TYX', 'US 30Y Yield'], ['DX-Y.NYB', 'US Dollar Idx']];
-  quoteBoard([...idxRows, ...cmdtyRows].map((r) => r[0])).then((byName) => {
-    const idx = el('home-idx'); if (idx) { idx.querySelector('.sec-body').innerHTML = boardTable(idxRows, byName); wireRows(idx); }
-    const cm = el('home-cmdty'); if (cm) { cm.querySelector('.sec-body').innerHTML = boardTable(cmdtyRows, byName); wireRows(cm); }
+const LP_CITIES = [['NEW YORK', 'America/New_York'], ['LONDON', 'Europe/London'], ['HONG KONG', 'Asia/Hong_Kong'], ['TOKYO', 'Asia/Tokyo']];
+const SECTORS = [['XLK', 'Technology'], ['XLF', 'Financials'], ['XLV', 'Health Care'], ['XLY', 'Cons Disc'],
+  ['XLP', 'Cons Staples'], ['XLE', 'Energy'], ['XLI', 'Industrials'], ['XLB', 'Materials'],
+  ['XLU', 'Utilities'], ['XLRE', 'Real Estate'], ['XLC', 'Comm Svcs']];
+let lpWeather = [];
+
+function renderLpClocks() {
+  const box = el('lp-clocks');
+  if (!box) return;
+  box.innerHTML = LP_CITIES.map(([name, tz]) => {
+    const t = new Date().toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const w = lpWeather.find((x) => x.name === name);
+    return `<div class="lp-clock"><div class="lp-city">${esc(name)}</div><div class="lp-time">${t}</div><div class="lp-wx">${w ? `${w.temp}°F · ${esc(w.cond)}` : ''}</div></div>`;
+  }).join('');
+}
+
+function setLp(id, html) { const e = el(id); if (e) { e.innerHTML = html; wireRows(e); } }
+
+async function showLaunchpad() {
+  state.view = 'LAUNCH'; setActiveTabs('HOME'); markFunc(null);
+  el('view').innerHTML = fnBar('LAUNCHPAD', 'LAUNCH', 'Live') + `<div class="lp-grid">
+    <div class="lp-panel"><div class="lp-head">WORLD CLOCKS</div><div class="lp-body" id="lp-clocks"><div class="loading">…</div></div></div>
+    <div class="lp-panel"><div class="lp-head">MAJOR INDICES</div><div class="lp-body pad0" id="lp-idx"><div class="loading">…</div></div></div>
+    <div class="lp-panel"><div class="lp-head">TOP MOVERS</div><div class="lp-body pad0" id="lp-mov"><div class="loading">…</div></div></div>
+    <div class="lp-panel"><div class="lp-head">GICS SECTOR MONITOR</div><div class="lp-body" id="lp-sect"><div class="loading">…</div></div></div>
+    <div class="lp-panel"><div class="lp-head">FX MAJORS</div><div class="lp-body pad0" id="lp-fx"><div class="loading">…</div></div></div>
+    <div class="lp-panel"><div class="lp-head">COMMODITIES</div><div class="lp-body pad0" id="lp-cmd"><div class="loading">…</div></div></div>
+    <div class="lp-panel lp-wide"><div class="lp-head">GLOBAL MACRO NEWS</div><div class="lp-body" id="lp-news"><div class="loading">…</div></div></div>
+  </div>`;
+  renderLpClocks();
+  api('/api/weather').then((w) => { lpWeather = w; renderLpClocks(); }).catch(() => {});
+
+  const idx = [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq'], ['^DJI', 'Dow Jones'], ['^RUT', 'Russell 2K'], ['^VIX', 'VIX'], ['^TNX', 'US 10Y']];
+  const fx = [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['USDJPY=X', 'USD/JPY'], ['USDCNY=X', 'USD/CNY'], ['DX-Y.NYB', 'Dollar Idx']];
+  const cmd = [['GC=F', 'Gold'], ['CL=F', 'WTI'], ['BZ=F', 'Brent'], ['NG=F', 'Nat Gas'], ['HG=F', 'Copper'], ['SI=F', 'Silver']];
+  quoteBoard([...idx, ...fx, ...cmd].map((r) => r[0])).then((bn) => {
+    setLp('lp-idx', boardTable(idx, bn));
+    setLp('lp-fx', boardTable(fx, bn, { spark: false }));
+    setLp('lp-cmd', boardTable(cmd, bn, { spark: false }));
   }).catch(() => {});
-  api('/api/movers?type=gainers').then((data) => {
-    const m = el('home-mov'); if (!m) return;
-    m.querySelector('.sec-body').innerHTML = `<div class="tbl-wrap"><table class="data">
-      <tr><th>SYM</th><th>NAME</th><th class="num">LAST</th><th class="num">CHG%</th></tr>
-      ${data.rows.slice(0, 12).map((r) => `<tr class="click" data-sym="${esc(r.symbol)}">
-        <td class="sym">${esc(r.symbol)}</td><td class="muted">${esc((r.name || '').slice(0, 22))}</td>
-        <td class="num">${fmtPrice(r.price)}</td><td class="num ${chgClass(r.change)}">${arrow(r.change)} ${fmtNum(Math.abs(r.changePct))}%</td>
-      </tr>`).join('')}</table></div>`;
-    wireRows(m);
+
+  api('/api/movers?type=gainers').then((d) => {
+    setLp('lp-mov', `<div class="tbl-wrap"><table class="data">
+      ${d.rows.slice(0, 9).map((r) => `<tr class="click" data-sym="${esc(r.symbol)}">
+        <td class="sym">${esc(r.symbol)}</td><td class="num">${fmtPrice(r.price)}</td>
+        <td class="num ${chgClass(r.change)}">${arrow(r.change)}${fmtNum(Math.abs(r.changePct))}%</td>
+        <td class="spark-td">${sparkCell(r.symbol)}</td></tr>`).join('')}</table></div>`);
   }).catch(() => {});
-  api('/api/news?symbol=SPY').then((data) => {
-    const nw = el('home-news'); if (nw) nw.querySelector('.sec-body').innerHTML = newsHTML(data.items, 12);
+
+  quoteBoard(SECTORS.map((r) => r[0])).then((bn) => {
+    const max = Math.max(0.5, ...SECTORS.map(([s]) => Math.abs(bn[s]?.changePct || 0)));
+    setLp('lp-sect', SECTORS.map(([s, name]) => {
+      const p = bn[s]?.changePct || 0;
+      const w = (Math.abs(p) / max) * 48;
+      return `<div class="sect-row click" data-sym="${esc(s)}">
+        <span class="sect-name">${esc(name)}</span>
+        <span class="sect-track"><span class="sect-bar ${chgClass(p)}" style="width:${w}%;${p < 0 ? 'right' : 'left'}:50%"></span></span>
+        <span class="sect-pct ${chgClass(p)}">${p >= 0 ? '+' : ''}${fmtNum(p)}%</span></div>`;
+    }).join(''));
   }).catch(() => {});
+
+  api('/api/news?symbol=SPY').then((d) => { const n = el('lp-news'); if (n) n.innerHTML = newsHTML(d.items, 10); }).catch(() => {});
 }
 
 /* ---------------------------------------------------------------- HELP */
@@ -831,14 +981,14 @@ function showHelp() {
       <tr><td>AAPL DES</td><td>Description — profile, identification, market data</td></tr>
       <tr><td>AAPL GP</td><td>Price graph — candles/line, 1D → MAX, crosshair OHLC</td></tr>
       <tr><td>AAPL GIP</td><td>Intraday price graph</td></tr>
-      <tr><td>AAPL FA</td><td>Fundamentals — valuation, margins, balance sheet, analyst targets</td></tr>
+      <tr><td>AAPL FA</td><td>Financial analysis — overview + multi-year income/balance/cash-flow/ratios</td></tr>
       <tr><td>AAPL ERN</td><td>Earnings — quarterly surprise, annual revenue/earnings</td></tr>
       <tr><td>AAPL CN</td><td>Company news</td></tr>
     </table></div>
     <div class="sec-bar" style="position:static;margin:8px 0 4px">MARKET MONITORS</div>
     <div class="tbl-wrap"><table class="data">
       <tr><th>COMMAND</th><th>FUNCTION</th></tr>
-      <tr><td>HOME</td><td>Market overview dashboard</td></tr>
+      <tr><td>HOME / LAUNCH</td><td>Launchpad — world clocks, indices, movers, sectors, macro news</td></tr>
       <tr><td>WEI</td><td>World equity indices (Americas / EMEA / Asia-Pac)</td></tr>
       <tr><td>MOST</td><td>Market movers — gainers, losers, most active</td></tr>
       <tr><td>CMDTY</td><td>Commodities — energy, metals, agriculture</td></tr>
@@ -864,7 +1014,8 @@ function runCommand(raw) {
   const [head, ...rest] = input.split(/\s+/);
 
   const topLevel = {
-    HOME: showHome, WEI: showWEI, MOST: showMovers, MOV: showMovers, MOVERS: showMovers,
+    HOME: showLaunchpad, LAUNCH: showLaunchpad, LP: showLaunchpad,
+    WEI: showWEI, MOST: showMovers, MOV: showMovers, MOVERS: showMovers,
     CMDTY: showCommodities, COMD: showCommodities, GOVT: showRates, RATES: showRates, YCRV: showRates,
     FX: showFX, WCRS: showFX, CRYP: showCrypto, CRYPTO: showCrypto, TOP: showTopNews,
     HELP: showHelp, MENU: showHelp, '?': showHelp,
@@ -971,7 +1122,7 @@ async function refreshSecQuote() {
 /* -------------------------------------------------------------- keybar */
 
 const KEYS = [
-  ['HOME', 'Home', 'k-orange'], ['WEI', 'World Idx', 'k-yellow'], ['MOST', 'Movers', 'k-yellow'],
+  ['HOME', 'Launchpad', 'k-orange'], ['WEI', 'World Idx', 'k-yellow'], ['MOST', 'Movers', 'k-yellow'],
   ['CMDTY', 'Cmdty', 'k-yellow'], ['GOVT', 'Rates', 'k-yellow'], ['FX', 'FX', 'k-yellow'],
   ['CRYP', 'Crypto', 'k-yellow'], ['TOP', 'News', 'k-blue'], ['DES', 'Desc', 'k-cyan'],
   ['GP', 'Graph', 'k-green'], ['FA', 'Fundmtls', 'k-cyan'], ['ERN', 'Earnings', 'k-cyan'],
@@ -987,7 +1138,7 @@ function buildKeybar() {
 
 function init() {
   buildKeybar();
-  showHome();
+  showLaunchpad();
   refreshTape();
   loadTicker();
   tickClock();
@@ -995,7 +1146,7 @@ function init() {
   setInterval(tickClock, 1000);
   setInterval(refreshTape, 30_000);
   setInterval(refreshSecQuote, 15_000);
-  setInterval(() => { if (state.view === 'HOME') showHome(); }, 60_000);
+  setInterval(() => { if (state.view === 'LAUNCH') showLaunchpad(); }, 90_000);
   setInterval(loadTicker, 300_000);
 
   document.querySelectorAll('.top-tab, #help-btn').forEach((b) =>
