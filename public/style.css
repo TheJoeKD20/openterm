@@ -177,6 +177,20 @@ button { font-family: var(--font-ui); cursor: pointer; color: inherit; }
 .wei-grid .sec-body, .mv-grid .sec-body { flex: 1; min-height: 0; overflow: auto; }
 @media (max-width: 900px) { .wei-grid, .mv-grid { grid-template-columns: 1fr; grid-auto-rows: auto; } }
 
+/* generic monitor grid (CMDTY / FX / GOVT / CRYP / ERN) */
+.mon-grid { flex: 1; min-height: 0; display: grid; gap: 2px; padding: 2px; grid-auto-rows: minmax(0, 1fr); }
+.mon-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.mon-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+/* short data tables up top, charts fill the rest */
+.mon-grid.tfill { grid-auto-rows: auto; grid-template-rows: auto minmax(140px, 1fr); }
+.mon-grid .section { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.mon-grid .sec-body { flex: 1; min-height: 0; overflow: auto; }
+.mon-grid .section.span2 { grid-column: span 2; }
+.mon-grid .section.rows2 { grid-row: span 2; }
+.mon-chart { flex: 1; min-height: 60px; position: relative; background: #000; }
+.mon-chart canvas { display: block; width: 100%; height: 100%; }
+@media (max-width: 900px) { .mon-grid.cols-2, .mon-grid.cols-3 { grid-template-columns: 1fr; grid-auto-rows: auto; } .mon-grid .section.span2, .mon-grid .section.rows2 { grid-column: auto; grid-row: auto; min-height: 180px; } }
+
 /* --------- red action banner (Financial Analysis etc.) + controls --- */
 
 .fn-bar { display: flex; align-items: stretch; gap: 3px; background: #05090e; border-bottom: 1px solid var(--border); padding: 2px 4px; height: 22px; position: sticky; top: 0; z-index: 6; }

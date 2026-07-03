@@ -939,41 +939,48 @@ function renderFAOverview(s, body) {
 
 async function showERN() {
   if (!state.symbol) { msg('Load a security first', true); return; }
-  setActiveTabs(null);
-  el('view').innerHTML = fnBar('EARNINGS', 'ERN', eqBox()) +
-    `<div class="sec-body"><div class="loading">Loading earnings…</div></div>`;
-  const body = el('view').querySelector('.sec-body');
+  setActiveTabs(null); markFunc('ERN');
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('EARNINGS', 'ERN', eqBox()) + `<div class="mon-grid cols-2">
+    <div class="section span2">${secBar('QUARTERLY EPS — ESTIMATE vs ACTUAL')}<div class="sec-body" id="ern-q"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('ANNUAL REVENUE & EARNINGS')}<div class="sec-body pad0" id="ern-a"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('REVENUE TREND')}<div class="sec-body pad0"><div class="mon-chart"><canvas id="ern-rev"></canvas></div></div></div>
+    <div class="section">${secBar('EARNINGS TREND')}<div class="sec-body pad0"><div class="mon-chart"><canvas id="ern-earn"></canvas></div></div></div>
+    <div class="section">${secBar('EARNINGS SUMMARY')}<div class="sec-body" id="ern-s"><div class="loading">…</div></div></div>
+  </div></div>`;
   try {
     const s = await api(`/api/summary/${encodeURIComponent(state.symbol)}`);
-    const q = s.earningsQuarterly || [];
-    const y = s.yearly || [];
-    if (!q.length && !y.length) { body.innerHTML = '<div class="muted">No earnings data available for this security.</div>'; return; }
+    const q = s.earningsQuarterly || [], y = s.yearly || [];
+    if (!q.length && !y.length) { el('view').querySelector('.mon-grid').innerHTML = '<div class="muted" style="padding:12px">No earnings data available for this security.</div>'; return; }
     const maxEps = Math.max(1, ...q.flatMap((r) => [Math.abs(r.actual || 0), Math.abs(r.estimate || 0)]));
-    const qHtml = q.map((r) => {
+    el('ern-q').innerHTML = `<div class="earn-row" style="height:110px">${q.map((r) => {
       const beat = r.actual != null && r.estimate != null ? r.actual - r.estimate : null;
-      const bh = (v) => `${Math.max(2, (Math.abs(v || 0) / maxEps) * 56)}px`;
+      const bh = (v) => `${Math.max(2, (Math.abs(v || 0) / maxEps) * 74)}px`;
       return `<div class="earn-col">
         <div class="earn-beat ${beat == null ? 'muted' : chgClass(beat)}">${beat == null ? '' : (beat >= 0 ? '+' : '') + fmtNum(beat)}</div>
-        <div class="earn-bars">
-          <div class="earn-bar est" style="height:${bh(r.estimate)}" title="Est ${fmtNum(r.estimate)}"></div>
-          <div class="earn-bar act" style="height:${bh(r.actual)}" title="Act ${fmtNum(r.actual)}"></div>
-        </div>
-        <div class="earn-lbl">${esc(r.period)}</div>
-      </div>`;
-    }).join('');
-    body.innerHTML = `
-      <div class="sec-bar" style="position:static;margin:2px 0 4px">QUARTERLY EPS — ESTIMATE vs ACTUAL</div>
-      <div class="earn-row">${qHtml}</div>
-      <div class="muted" style="font-size:11px"><span style="color:var(--grey-2)">▉</span> estimate &nbsp; <span style="color:var(--orange)">▉</span> actual &nbsp; number = surprise</div>
-      <div class="sec-bar" style="position:static;margin:10px 0 4px">ANNUAL REVENUE & EARNINGS</div>
-      <div class="tbl-wrap"><table class="data">
-        <tr><th>YEAR</th><th class="num">REVENUE</th><th class="num">EARNINGS</th><th class="num">NET MARGIN</th></tr>
-        ${y.map((r) => `<tr><td class="hl">${esc(r.year)}</td><td class="num">${fmtBig(r.revenue)}</td><td class="num">${fmtBig(r.earnings)}</td><td class="num">${r.revenue ? fmtPct((r.earnings / r.revenue) * 100) : '—'}</td></tr>`).join('')}
-      </table></div>
-      <div class="kv-grid" style="margin-top:10px">
-        <div class="kv"><span class="k">Next Earnings Date</span><span class="v hl">${fmtDate(s.nextEarningsDate)}</span></div>
-      </div>`;
-  } catch (err) { body.innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+        <div class="earn-bars" style="height:78px"><div class="earn-bar est" style="height:${bh(r.estimate)}" title="Est ${fmtNum(r.estimate)}"></div><div class="earn-bar act" style="height:${bh(r.actual)}" title="Act ${fmtNum(r.actual)}"></div></div>
+        <div class="earn-lbl">${esc(r.period)}</div></div>`;
+    }).join('')}</div>
+      <div class="muted" style="font-size:11px;padding:0 4px"><span style="color:var(--muted)">▉</span> estimate &nbsp; <span style="color:var(--orange)">▉</span> actual &nbsp; number = surprise (EPS)</div>`;
+    el('ern-a').innerHTML = `<div class="tbl-wrap"><table class="data">
+      <tr><th>YEAR</th><th class="num">REVENUE</th><th class="num">EARNINGS</th><th class="num">NET MARGIN</th></tr>
+      ${y.map((r) => `<tr><td class="hl">${esc(r.year)}</td><td class="num">${fmtBig(r.revenue)}</td><td class="num">${fmtBig(r.earnings)}</td><td class="num">${r.revenue ? fmtPct((r.earnings / r.revenue) * 100) : '—'}</td></tr>`).join('')}
+    </table></div>`;
+    const lastQ = q[q.length - 1] || {};
+    const beatCt = q.filter((r) => r.actual != null && r.estimate != null && r.actual >= r.estimate).length;
+    const row = (k, v, cls = '') => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${cls}">${v}</span></div>`;
+    el('ern-s').innerHTML = `<div class="kv-grid" style="grid-template-columns:1fr;padding:2px 6px">
+      ${row('Next Earnings', fmtDate(s.nextEarningsDate), 'hl')}
+      ${row('Last Qtr', esc(lastQ.period || '—'))}
+      ${row('Last Actual EPS', lastQ.actual != null ? fmtNum(lastQ.actual, 2) : '—')}
+      ${row('Last Est EPS', lastQ.estimate != null ? fmtNum(lastQ.estimate, 2) : '—')}
+      ${row('Last Surprise', lastQ.actual != null && lastQ.estimate != null ? `<span class="${chgClass(lastQ.actual - lastQ.estimate)}">${(lastQ.actual - lastQ.estimate >= 0 ? '+' : '') + fmtNum(lastQ.actual - lastQ.estimate, 2)}</span>` : '—')}
+      ${row('Beats (last ' + q.length + ')', `${beatCt} / ${q.length}`, 'pos')}
+      ${row('EPS (TTM)', fmtPrice(s.eps))}
+      ${row('Fwd P/E', fmtRatio(s.peForward))}
+    </div>`;
+    drawMiniChart('ern-rev', y.map((r) => r.revenue).filter((v) => v != null), '#f6a313');
+    drawMiniChart('ern-earn', y.map((r) => r.earnings).filter((v) => v != null), '#4ec8ff');
+  } catch (err) { el('view').querySelector('.mon-grid').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 
 /* --------------------------------------------------------------- news */
@@ -1082,15 +1089,37 @@ async function showWEI() {
 
 /* -------------------------------------------------------- CMDTY */
 
+function loadMonChart(id, symbol, color, range = '1d') {
+  api(`/api/history/${encodeURIComponent(symbol)}?range=${range}`).then((d) => {
+    const closes = (d.candles || []).map((c) => c.c);
+    const up = closes.length && closes[closes.length - 1] >= closes[0];
+    drawMiniChart(id, closes, color || (up ? '#00c853' : '#ff3d57'));
+  }).catch(() => {});
+}
+
+const CMDTY_GROUPS = {
+  'ENERGY': [['CL=F', 'WTI Crude'], ['BZ=F', 'Brent Crude'], ['NG=F', 'Natural Gas'], ['RB=F', 'Gasoline'], ['HO=F', 'Heating Oil']],
+  'METALS': [['GC=F', 'Gold'], ['SI=F', 'Silver'], ['PL=F', 'Platinum'], ['PA=F', 'Palladium'], ['HG=F', 'Copper']],
+  'AGRICULTURE': [['ZC=F', 'Corn'], ['ZW=F', 'Wheat'], ['ZS=F', 'Soybeans'], ['KC=F', 'Coffee'], ['SB=F', 'Sugar'], ['CT=F', 'Cotton'], ['CC=F', 'Cocoa']],
+  'SOFTS & LIVESTOCK': [['LE=F', 'Live Cattle'], ['GF=F', 'Feeder Cattle'], ['HE=F', 'Lean Hogs'], ['OJ=F', 'Orange Juice'], ['LBS=F', 'Lumber']],
+};
+
 async function showCommodities() {
   state.view = 'CMDTY'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = fnBar('COMMODITIES', 'CMDTY', 'CMDTY Monitor') + `<div id="cmdty-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('COMMODITIES', 'CMDTY', 'CMDTY Monitor') + `<div class="mon-grid cols-3 tfill" id="cmdty-body">
+    <div class="section">${secBar('ENERGY')}<div class="sec-body pad0" id="cm-energy"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('METALS')}<div class="sec-body pad0" id="cm-metals"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('AGRICULTURE')}<div class="sec-body pad0" id="cm-ag"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('SOFTS & LIVESTOCK')}<div class="sec-body pad0" id="cm-soft"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('GOLD · INTRADAY')}<div class="sec-body pad0"><div class="mon-chart"><canvas id="cm-gold"></canvas></div></div></div>
+    <div class="section">${secBar('WTI CRUDE · INTRADAY')}<div class="sec-body pad0"><div class="mon-chart"><canvas id="cm-wti"></canvas></div></div></div>
+  </div></div>`;
   try {
-    const all = Object.values(COMMODITIES).flat().map((r) => r[0]);
-    const byName = await quoteBoard(all);
-    el('cmdty-body').innerHTML = Object.entries(COMMODITIES).map(([grp, rows]) => `
-      <div class="section">${secBar(grp)}<div class="sec-body" style="padding:0">${boardTable(rows, byName)}</div></div>`).join('');
-    wireRows(el('cmdty-body'));
+    const byName = await quoteBoard(Object.values(CMDTY_GROUPS).flat().map((r) => r[0]));
+    const set = (id, rows) => { const e = el(id); if (e) { e.innerHTML = boardTable(rows, byName, { spark: false }); wireRows(e); } };
+    set('cm-energy', CMDTY_GROUPS.ENERGY); set('cm-metals', CMDTY_GROUPS.METALS);
+    set('cm-ag', CMDTY_GROUPS.AGRICULTURE); set('cm-soft', CMDTY_GROUPS['SOFTS & LIVESTOCK']);
+    loadMonChart('cm-gold', 'GC=F', '#ffe45c'); loadMonChart('cm-wti', 'CL=F');
   } catch (err) { el('cmdty-body').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 
@@ -1098,15 +1127,26 @@ async function showCommodities() {
 
 async function showRates() {
   state.view = 'GOVT'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = fnBar('US TREASURY YIELDS & FUTURES', 'GOVT', 'GOVT Monitor') + `<div id="rate-body"><div class="loading">Loading…</div></div>`;
+  const YIELDS = [['^IRX', 'US 3-Month'], ['^FVX', 'US 5-Year'], ['^TNX', 'US 10-Year'], ['^TYX', 'US 30-Year']];
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('US TREASURY YIELDS & FUTURES', 'GOVT', 'GOVT Monitor') + `<div class="mon-grid cols-2 tfill">
+    <div class="section">${secBar('BENCHMARK YIELDS (%)')}<div class="sec-body pad0" id="gv-yield"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('TREASURY FUTURES')}<div class="sec-body pad0" id="gv-fut"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('US YIELD CURVE')}<div class="sec-body pad0"><div class="mon-chart"><canvas id="gv-curve"></canvas></div></div></div>
+    <div class="section">${secBar('KEY SPREADS (bp)')}<div class="sec-body" id="gv-spread"><div class="loading">…</div></div></div>
+  </div></div>`;
   try {
-    const byName = await quoteBoard([...RATES, ...RATE_FUT].map((r) => r[0]));
-    el('rate-body').innerHTML = `<div class="grid-2">
-      <div class="section">${secBar('BENCHMARK YIELDS (%)')}<div class="sec-body" style="padding:0">${boardTable(RATES, byName)}</div></div>
-      <div class="section">${secBar('TREASURY FUTURES')}<div class="sec-body" style="padding:0">${boardTable(RATE_FUT, byName)}</div></div>
+    const byName = await quoteBoard([...YIELDS, ...RATE_FUT].map((r) => r[0]));
+    const yy = el('gv-yield'); if (yy) { yy.innerHTML = boardTable(YIELDS, byName, { spark: false }); wireRows(yy); }
+    const ff = el('gv-fut'); if (ff) { ff.innerHTML = boardTable(RATE_FUT, byName, { spark: false }); wireRows(ff); }
+    const y3 = byName['^IRX']?.price, y5 = byName['^FVX']?.price, y10 = byName['^TNX']?.price, y30 = byName['^TYX']?.price;
+    drawMiniChart('gv-curve', [y3, y5, y10, y30].filter((v) => v != null), '#ffe45c');
+    const bp = (a, b) => (a != null && b != null ? Math.round((a - b) * 100) : null);
+    const sp = (k, v) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${v > 0 ? 'pos' : v < 0 ? 'neg' : ''}">${v == null ? '—' : (v > 0 ? '+' : '') + v + ' bp'}</span></div>`;
+    el('gv-spread').innerHTML = `<div class="kv-grid" style="grid-template-columns:1fr">
+      ${sp('10Y − 3M', bp(y10, y3))}${sp('10Y − 5Y', bp(y10, y5))}${sp('30Y − 10Y', bp(y30, y10))}${sp('30Y − 5Y', bp(y30, y5))}
+      <div class="kv"><span class="k">Curve</span><span class="v ${bp(y10, y3) >= 0 ? 'pos' : 'neg'}">${bp(y10, y3) >= 0 ? 'NORMAL' : 'INVERTED'}</span></div>
     </div>`;
-    wireRows(el('rate-body'));
-  } catch (err) { el('rate-body').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+  } catch (err) { el('view').querySelector('.mon-grid').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 
 /* -------------------------------------------------------- MOST (movers) */
@@ -1142,44 +1182,70 @@ async function showMovers() {
 
 async function showFX() {
   state.view = 'FX'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = fnBar('CURRENCY RATES (ECB REFERENCE)', 'FX', 'FX Monitor') + `<div id="fx-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('CURRENCY RATES (ECB REFERENCE)', 'FX', 'FX Monitor') + `<div class="mon-grid cols-2 tfill">
+    <div class="section">${secBar('USD MAJORS')}<div class="sec-body pad0" id="fx-maj"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('USD EM / ASIA')}<div class="sec-body pad0" id="fx-em"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('CROSS RATES')}<div class="sec-body" id="fx-cross"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('US DOLLAR INDEX · INTRADAY')}<div class="sec-body pad0"><div class="mon-chart"><canvas id="fx-dxy"></canvas></div></div></div>
+  </div></div>`;
   try {
     const data = await api('/api/fx?base=USD');
-    el('fx-body').innerHTML = `
-      <div class="sec-body" style="padding-bottom:0"><span class="muted">Base <span class="hl">USD</span> · ECB reference · ${esc(data.date)}</span></div>
-      <div class="tbl-wrap"><table class="data">
-        <tr><th>PAIR</th><th class="num">RATE</th><th class="num">CHG</th><th class="num">CHG%</th><th class="num">INVERSE</th></tr>
-        ${data.rates.map((r) => `<tr class="click" data-sym="${esc(data.base + r.ccy)}=X">
-          <td class="sym">${esc(data.base)}/${esc(r.ccy)}</td>
-          <td class="num">${fmtNum(r.rate, 4)}</td>
-          <td class="num ${chgClass(r.change)}">${arrow(r.change)} ${fmtNum(Math.abs(r.change), 4)}</td>
-          <td class="num ${chgClass(r.changePct)}">${fmtNum(r.changePct)}%</td>
-          <td class="num muted">${fmtNum(1 / r.rate, 4)}</td>
-        </tr>`).join('')}
-      </table></div>`;
-    wireRows(el('fx-body'));
-  } catch (err) { el('fx-body').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+    const R = {}; data.rates.forEach((r) => { R[r.ccy] = r; });
+    const rowFor = (ccy, invert) => {
+      const r = R[ccy]; if (!r) return '';
+      const rate = invert ? 1 / r.rate : r.rate, chg = invert ? -r.changePct : r.changePct;
+      const label = invert ? `${ccy}/USD` : `USD/${ccy}`, sym = invert ? `${ccy}USD=X` : `USD${ccy}=X`;
+      return `<tr class="click" data-sym="${esc(sym)}"><td class="sym">${esc(label)}</td><td class="num">${fmtNum(rate, 4)}</td>
+        <td class="num ${chgClass(chg)}">${arrow(chg)} ${fmtNum(Math.abs(chg))}%</td></tr>`;
+    };
+    const tbl = (pairs) => `<div class="tbl-wrap"><table class="data"><tr><th>PAIR</th><th class="num">RATE</th><th class="num">CHG%</th></tr>${pairs.map(([c, inv]) => rowFor(c, inv)).join('')}</table></div>`;
+    const maj = el('fx-maj'); if (maj) { maj.innerHTML = tbl([['EUR', 1], ['GBP', 1], ['JPY', 0], ['CHF', 0], ['CAD', 0], ['AUD', 1], ['NZD', 1]]); wireRows(maj); }
+    const em = el('fx-em'); if (em) { em.innerHTML = tbl([['CNY', 0], ['INR', 0], ['MXN', 0], ['BRL', 0], ['KRW', 0], ['ZAR', 0], ['SEK', 0], ['NOK', 0]]); wireRows(em); }
+    const g = (c) => R[c]?.rate;
+    const cross = (a, b, v) => `<div class="kv"><span class="k">${a}/${b}</span><span class="v hl">${v ? fmtNum(v, 4) : '—'}</span></div>`;
+    el('fx-cross').innerHTML = `<div class="kv-grid" style="grid-template-columns:1fr 1fr;padding:2px 6px">
+      ${cross('EUR', 'USD', g('EUR') ? 1 / g('EUR') : null)}${cross('GBP', 'USD', g('GBP') ? 1 / g('GBP') : null)}
+      ${cross('AUD', 'USD', g('AUD') ? 1 / g('AUD') : null)}${cross('USD', 'JPY', g('JPY'))}
+      ${cross('EUR', 'GBP', g('EUR') && g('GBP') ? g('GBP') / g('EUR') : null)}${cross('EUR', 'JPY', g('EUR') && g('JPY') ? g('JPY') / g('EUR') : null)}
+      ${cross('GBP', 'JPY', g('GBP') && g('JPY') ? g('JPY') / g('GBP') : null)}${cross('EUR', 'CHF', g('EUR') && g('CHF') ? g('CHF') / g('EUR') : null)}
+    </div><div class="muted" style="padding:2px 6px;font-size:11px">Base USD · ECB reference · ${esc(data.date)}</div>`;
+    loadMonChart('fx-dxy', 'DX-Y.NYB', '#ffe45c');
+  } catch (err) { el('view').querySelector('.mon-grid').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 
 /* -------------------------------------------------------------- crypto */
 
 async function showCrypto() {
   state.view = 'CRYP'; setActiveTabs(null); markFunc(null);
-  el('view').innerHTML = fnBar('CRYPTOCURRENCY MARKET', 'CRYP', 'CRYP Monitor') + `<div id="cryp-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('CRYPTOCURRENCY MARKET', 'CRYP', 'CRYP Monitor') + `<div class="mon-grid cols-3">
+    <div class="section span2 rows2">${secBar('CRYPTOCURRENCY MARKET · TOP 25', 'CoinGecko')}<div class="sec-body pad0" id="cy-tbl"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('BTC-USD · INTRADAY')}<div class="sec-body pad0"><div class="mon-chart"><canvas id="cy-btc"></canvas></div></div></div>
+    <div class="section">${secBar('CRYPTO HEATMAP · 24H')}<div class="sec-body pad0" id="cy-heat"><div class="loading">…</div></div></div>
+  </div></div>`;
   try {
     const coins = await api('/api/crypto');
-    el('cryp-body').innerHTML = `<div class="tbl-wrap"><table class="data">
-      <tr><th>#</th><th>SYM</th><th>NAME</th><th class="num">PRICE</th><th class="num">24H%</th><th class="num">24H RANGE</th><th class="num">MKT CAP</th><th class="num">VOLUME</th></tr>
-      ${coins.map((c, i) => `<tr class="click" data-sym="${esc(c.symbol)}-USD">
-        <td class="muted">${i + 1}</td><td class="sym">${esc(c.symbol)}</td><td class="muted">${esc(c.name)}</td>
-        <td class="num">${fmtPrice(c.price)}</td>
-        <td class="num ${chgClass(c.changePct)}">${arrow(c.changePct)} ${fmtNum(Math.abs(c.changePct))}%</td>
-        <td class="num muted">${fmtPrice(c.low24h)} – ${fmtPrice(c.high24h)}</td>
-        <td class="num">${fmtBig(c.marketCap)}</td><td class="num">${fmtBig(c.volume)}</td>
-      </tr>`).join('')}
-    </table></div>`;
-    wireRows(el('cryp-body'));
-  } catch (err) { el('cryp-body').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+    const t = el('cy-tbl');
+    if (t) {
+      t.innerHTML = `<div class="tbl-wrap"><table class="data">
+        <tr><th>#</th><th>SYM</th><th>NAME</th><th class="num">PRICE</th><th class="num">24H%</th><th class="num">24H RANGE</th><th class="num">MKT CAP</th><th class="num">VOLUME</th></tr>
+        ${coins.map((c, i) => `<tr class="click" data-sym="${esc(c.symbol)}-USD">
+          <td class="muted">${i + 1}</td><td class="sym">${esc(c.symbol)}</td><td class="muted">${esc(c.name)}</td>
+          <td class="num">${fmtPrice(c.price)}</td>
+          <td class="num ${chgClass(c.changePct)}">${arrow(c.changePct)} ${fmtNum(Math.abs(c.changePct))}%</td>
+          <td class="num muted">${fmtPrice(c.low24h)} – ${fmtPrice(c.high24h)}</td>
+          <td class="num">${fmtBig(c.marketCap)}</td><td class="num">${fmtBig(c.volume)}</td>
+        </tr>`).join('')}
+      </table></div>`;
+      wireRows(t);
+    }
+    const h = el('cy-heat');
+    if (h) {
+      const bn = Object.fromEntries(coins.map((c) => [`${c.symbol}-USD`, { changePct: c.changePct, change: c.changePct }]));
+      h.innerHTML = heatGrid(coins.slice(0, 24).map((c) => [`${c.symbol}-USD`, c.symbol]), bn);
+      wireRows(h);
+    }
+    loadMonChart('cy-btc', 'BTC-USD');
+  } catch (err) { el('view').querySelector('.mon-grid').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 
 /* ---------------------------------------------------------- watchlist */

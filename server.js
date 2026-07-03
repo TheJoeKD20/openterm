@@ -46,15 +46,18 @@ setInterval(() => {
   for (const [k, v] of cache) if (v.exp < now) cache.delete(k);
 }, 60_000).unref();
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // undici.request (not fetch): fetch adds Sec-Fetch-Mode/Accept-Language headers
-// that Yahoo's edge rejects with 429.
-async function getJSON(url, headers = {}) {
-  const res = await request(url, { headers: { 'User-Agent': UA, Accept: 'application/json', ...headers }, dispatcher });
-  if (res.statusCode < 200 || res.statusCode >= 300) {
+// that Yahoo's edge rejects with 429. Retry once on transient throttling.
+async function getJSON(url, headers = {}, retries = 2) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await request(url, { headers: { 'User-Agent': UA, Accept: 'application/json', ...headers }, dispatcher });
+    if (res.statusCode >= 200 && res.statusCode < 300) return res.body.json();
     await res.body.dump();
+    if (attempt < retries && [429, 502, 503, 999].includes(res.statusCode)) { await sleep(200 * (attempt + 1)); continue; }
     throw new Error(`${res.statusCode} for ${url}`);
   }
-  return res.body.json();
 }
 
 function fail(res, err) {
