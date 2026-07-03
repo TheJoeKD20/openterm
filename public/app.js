@@ -1605,7 +1605,12 @@ async function showLaunchpad() {
     <div class="lp-panel"><div class="lp-head">US YIELD CURVE</div><div class="lp-body"><div class="lp-wrap-canvas"><canvas id="lp-curve" class="lp-canvas"></canvas></div></div></div>
   </div></div>`;
   renderLpClocks();
-  setTimeout(showToast, 2500);
+  setTimeout(() => { if (state.view === 'LAUNCH') showToast(); }, 2500);
+  // a failed feed must show as failed, not spin on "…" forever
+  const lpFail = (...ids) => () => ids.forEach((id) => {
+    const e = el(id);
+    if (e && e.querySelector('.loading')) e.innerHTML = '<div class="err" style="padding:6px">unavailable — retries on next refresh</div>';
+  });
   api('/api/weather').then((w) => { lpWeather = w; renderLpClocks(); }).catch(() => {});
 
   const idx = [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq'], ['^DJI', 'Dow'], ['^RUT', 'Russell 2K'], ['^VIX', 'VIX'], ['^TNX', 'US 10Y'], ['^FTSE', 'FTSE'], ['^N225', 'Nikkei']];
@@ -1622,7 +1627,7 @@ async function showLaunchpad() {
     // yield curve from the four benchmark tenors
     const curve = rate.map(([s]) => bn[s]?.price).filter((v) => v != null);
     drawMiniChart('lp-curve', curve.length >= 2 ? curve : [4.4, 4.2, 4.5, 4.9], '#ffe45c');
-  }).catch(() => {});
+  }).catch(lpFail('lp-idx', 'lp-fx', 'lp-cmd', 'lp-rate', 'lp-fut'));
 
   // heatmap + equity watchlist share one quote batch
   const heatList = [...state.watchlist, 'SPY', 'QQQ', 'DIA', 'IWM', ...SECTORS.map((r) => r[0])];
@@ -1634,17 +1639,17 @@ async function showLaunchpad() {
         <td class="sym">${esc(s)}</td><td class="num">${fmtPrice(q.price)}</td>
         <td class="num ${chgClass(q.change)}">${arrow(q.change || 0)}${fmtNum(Math.abs(q.changePct || 0))}%</td>
         <td class="spark-td">${sparkCell(s)}</td></tr>`; }).join('')}</table></div>`);
-  }).catch(() => {});
+  }).catch(lpFail('lp-heat', 'lp-ewatch'));
 
   api('/api/crypto').then((coins) => {
     setLp('lp-cryp', `<div class="tbl-wrap"><table class="data">${coins.slice(0, 9).map((c) => `<tr class="click" data-sym="${esc(c.symbol)}-USD">
       <td class="sym">${esc(c.symbol)}</td><td class="num">${fmtPrice(c.price)}</td>
       <td class="num ${chgClass(c.changePct)}">${arrow(c.changePct)}${fmtNum(Math.abs(c.changePct))}%</td></tr>`).join('')}</table></div>`);
-  }).catch(() => {});
+  }).catch(lpFail('lp-cryp'));
 
   api('/api/trending').then((d) => quoteBoard((d.symbols || []).slice(0, 10)).then((bn) => {
     setLp('lp-trend', compactBoard((d.symbols || []).slice(0, 10).map((s) => [s, s]), bn));
-  })).catch(() => {});
+  })).catch(lpFail('lp-trend'));
 
   api('/api/movers?type=gainers').then((d) => {
     setLp('lp-mov', `<div class="tbl-wrap"><table class="data">
@@ -1652,14 +1657,14 @@ async function showLaunchpad() {
         <td class="sym">${esc(r.symbol)}</td><td class="num">${fmtPrice(r.price)}</td>
         <td class="num ${chgClass(r.change)}">${arrow(r.change)}${fmtNum(Math.abs(r.changePct))}%</td>
         <td class="spark-td">${sparkCell(r.symbol)}</td></tr>`).join('')}</table></div>`);
-  }).catch(() => {});
+  }).catch(lpFail('lp-mov'));
   api('/api/movers?type=actives').then((d) => {
     setLp('lp-active', `<div class="tbl-wrap"><table class="data">
       ${d.rows.slice(0, 12).map((r) => `<tr class="click" data-sym="${esc(r.symbol)}">
         <td class="sym">${esc(r.symbol)}</td><td class="num">${fmtPrice(r.price)}</td>
         <td class="num ${chgClass(r.change)}">${arrow(r.change)}${fmtNum(Math.abs(r.changePct))}%</td>
         <td class="num muted">${fmtBig(r.volume)}</td></tr>`).join('')}</table></div>`);
-  }).catch(() => {});
+  }).catch(lpFail('lp-active'));
 
   quoteBoard(SECTORS.map((r) => r[0])).then((bn) => {
     const max = Math.max(0.5, ...SECTORS.map(([s]) => Math.abs(bn[s]?.changePct || 0)));
@@ -1682,7 +1687,7 @@ async function showLaunchpad() {
         <div class="muted" style="font-size:11px">GICS · ${fmtNum(upPct, 0)}% advancing · Breadth ${up >= dn ? '<span class="pos">POSITIVE</span>' : '<span class="neg">NEGATIVE</span>'}</div>
       </div></div>`);
     setTimeout(() => drawDonut(el('lp-donut'), [{ v: up, color: '#2aa63f' }, { v: dn, color: '#ff3d57' }]), 30);
-  }).catch(() => {});
+  }).catch(lpFail('lp-sect', 'lp-breadth'));
 
   api('/api/history/%5EGSPC?range=1d').then((d) => {
     drawMiniChart('lp-chart', d.candles.map((c) => c.c), d.candles.length && d.candles[d.candles.length - 1].c >= d.candles[0].c ? '#00c853' : '#ff3d57');
@@ -1700,7 +1705,7 @@ async function showLaunchpad() {
       <div style="color:var(--orange);font-size:12px;line-height:1.4">${esc((lead.summary || 'Wire coverage spanning global equities, rates, FX, and commodities. Headlines refresh continuously; select any story to open the full text. Cross-asset moves, central-bank commentary, and earnings updates are aggregated here.').slice(0, 420))}</div>
       ${items.slice(1, 4).map((it) => `<div style="margin-top:4px;font-size:12px;color:var(--white)">• ${esc(it.title)} <span class="muted">— ${esc(it.source || '')}</span></div>`).join('')}
     </div>`;
-  }).catch(() => {});
+  }).catch(lpFail('lp-news', 'lp-newsd'));
 }
 
 
@@ -2471,7 +2476,6 @@ function renderAC() {
       <span class="ac-name">${esc(q.name)}</span><span class="ac-exch">${esc(q.exchange || '')}</span></div>`;
   };
   let html = `<div class="ac-hint">&lt;UP ARROW&gt; to hide<span>Autocomplete</span></div>`;
-  let started;
   const section = (label, items) => {
     if (!items.length) return '';
     return `<div class="ac-head">${label}</div>` + items.map(([q, i]) => row(q, i)).join('');
@@ -2493,11 +2497,13 @@ function onCmdInput() {
   const fns = FUNC_DEFS.filter(([c]) => c.startsWith(v.toUpperCase())).slice(0, 3)
     .map(([code, name]) => ({ t: 'fn', code, name }));
   acTimer = setTimeout(async () => {
+    const stale = () => el('cmd').value.trim() !== v; // keystrokes since this fetch
     try {
       const d = await api(`/api/search?q=${encodeURIComponent(v)}`);
+      if (stale()) return;
       acItems = [...fns, ...d.quotes.slice(0, 7), { t: 'search', q: v }];
       acSel = -1; renderAC();
-    } catch { acItems = [...fns, { t: 'search', q: v }]; acSel = -1; renderAC(); }
+    } catch { if (!stale()) { acItems = [...fns, { t: 'search', q: v }]; acSel = -1; renderAC(); } }
   }, 200);
 }
 
@@ -2640,10 +2646,11 @@ function init() {
 
   window.addEventListener('resize', () => { if (chartEl && el('chart')) resizeChart(); });
 
-  // keep focus on command line (desktop only — avoid popping mobile keyboard)
+  // keep focus on command line (desktop only — avoid popping mobile keyboard;
+  // while PANL is open the panels own the keyboard, don't type into a covered input)
   if (!matchMedia('(pointer: coarse)').matches) {
     document.addEventListener('keydown', (e) => {
-      if (e.target === cmd || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.target === cmd || e.ctrlKey || e.metaKey || e.altKey || el('panl')) return;
       if (e.key.length === 1) cmd.focus();
     });
   }
