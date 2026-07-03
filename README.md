@@ -22,8 +22,8 @@ Type `AAPL FA` and hit `GO`.
 ## ⚡ Quick start
 
 ```bash
-git clone https://github.com/TheJoeKD20/bloomberg.git
-cd bloomberg
+git clone https://github.com/TheJoeKD20/openterm.git
+cd openterm
 npm install
 npm start           # → http://localhost:8432
 ```
