@@ -27,7 +27,7 @@
   --orange: #f6a313;
   --orange-dark: #b06f0c;
   --yellow: #ffe45c;
-  --red: #8f1e2a;          /* measured banner crimson */
+  --red: #870f1e;          /* sampled from real GP screen PNG */
   --red-bright: #a92433;
   --blue: #128bd2;
   --blue-tab: #128bd2;
@@ -206,7 +206,7 @@ button { font-family: var(--font-ui); cursor: pointer; color: inherit; }
 /* --------- red action banner (Financial Analysis etc.) + controls --- */
 
 .fn-bar { display: flex; align-items: stretch; gap: 3px; background: #05090e; border-bottom: 1px solid var(--border); padding: 2px 4px; height: 22px; position: sticky; top: 0; z-index: 6; }
-.fn-secbox { background: var(--yellow); color: #000; font-weight: bold; font-size: 11px; padding: 0 8px; display: flex; align-items: center; letter-spacing: 0; }
+.fn-secbox { background: #ff9e28; color: #000; font-weight: bold; font-size: 11px; padding: 0 8px; display: flex; align-items: center; letter-spacing: 0; }
 .fn-actions { display: flex; gap: 2px; }
 .fn-act { background: var(--red); color: var(--white); border: 1px solid var(--red-bright); font-size: 11px; padding: 0 7px; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .fn-act .n { color: #ffb9c3; }
@@ -247,6 +247,7 @@ td.sym, .sym-cell { color: var(--yellow); font-weight: bold; }
 .tb-btn { background: var(--panel-2); border: 1px solid var(--border); color: var(--white); font-family: var(--font-ui); font-size: 11px; padding: 0 8px; height: 18px; }
 .tb-btn:hover { border-color: var(--cyan); }
 .tb-btn.active { background: var(--blue-tab); color: #001; border-color: var(--blue-tab); }
+.tb-btn.rbtn.active, .tb-btn.tbtn.active { background: #1a1a1a; color: var(--orange); border-color: #000; font-weight: bold; }
 #chart-wrap { flex: 1; min-height: 120px; position: relative; background: #000; }
 #chart { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
 #chart-legend { padding: 2px 6px; color: var(--cyan); font-size: 11px; font-family: var(--font-data); min-height: 18px; border-top: 1px solid var(--border); flex-shrink: 0; overflow-x: auto; white-space: nowrap; background: var(--panel); }
@@ -535,6 +536,112 @@ table.fin td.est-i, .est-i, td.est-i { color: #a3c2c2 !important; }
 .panl-cell.active { border-color: var(--orange); animation: panl-blink 1.1s steps(1) infinite; }
 .panl-cell.active .panl-num { background: var(--orange); color: #000; }
 @keyframes panl-blink { 0%, 60% { outline: 1px solid var(--orange); } 61%, 100% { outline: 1px solid transparent; } }
+
+/* ------------------------------------ visual-research authenticity pass */
+
+/* quote-line: orange labels, white values (GME OWN reference) */
+.ql-k { color: var(--orange); font-weight: bold; }
+.ql-v { color: var(--white); }
+
+/* continuous red action band — items sit flat ON the bar (OWN/GP refs) */
+.fn-bar { background: var(--red); }
+.fn-act {
+  background: transparent; color: #f2d9dc;
+  border: none !important; box-shadow: none !important;
+  border-right: 1px solid rgba(0,0,0,0.35) !important; font-weight: bold;
+}
+.fn-act .n { color: #d99aa4; font-weight: normal; }
+.fn-act:hover { background: rgba(0,0,0,0.25); color: #fff; }
+.fn-name { background: transparent; border: none !important; box-shadow: none !important; }
+.fn-ctrl { background: #2b1f04; }
+
+/* slanted parallelogram sub-tabs (OWN reference) */
+.fa-tabs .fa-tab {
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  padding: 2px 16px; margin-right: -6px;
+}
+.fa-tabs .fa-tab.active { position: relative; z-index: 2; }
+
+/* cyan identity line under the action band (GAMESTOP CORP-CLASS A · CUSIP) */
+.ident-line { padding: 1px 8px; font-size: 12.5px; color: var(--cyan); font-weight: bold; background: var(--bg); border-bottom: 1px solid var(--grid-soft); flex-shrink: 0; font-family: var(--font-data); }
+
+/* GP toolbar date boxes + left tool strip + volume header band */
+#gp-dates { display: inline-flex; gap: 4px; align-items: center; }
+.gp-date { background: #e8e4d8; color: #000; font-size: 10.5px; font-weight: bold; padding: 1px 6px; height: 16px; display: inline-flex; align-items: center; }
+#gp-tools {
+  position: absolute; left: 0; top: 8px; z-index: 4; width: 15px;
+  color: #5a6675; font-size: 10px; line-height: 1.9; text-align: center;
+  border-right: 1px solid var(--grid-soft); background: rgba(0,0,0,0.4); pointer-events: none;
+}
+#chart-sub { position: relative; }
+#vol-head { position: absolute; left: 18px; top: 2px; z-index: 4; font-family: var(--font-data); font-size: 10px; color: var(--muted); background: rgba(21,21,24,0.85); padding: 0 5px; pointer-events: none; }
+
+/* sectioned autocomplete panel (FUNCTIONS / SECURITIES / SEARCH) */
+#autocomplete { min-width: 560px; border: 1px solid var(--grid); background: #000; }
+.ac-hint { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; padding: 2px 8px; border-bottom: 1px solid var(--grid-soft); font-style: italic; }
+.ac-hint span { color: var(--cyan); font-style: normal; }
+.ac-head { color: var(--orange); font-weight: bold; font-size: 11px; padding: 3px 8px 1px; letter-spacing: 0.5px; }
+.ac-row { border-bottom: none; padding: 1px 8px 1px 14px; }
+.ac-sym { color: var(--white); min-width: 150px; }
+.ac-yk { color: var(--white); font-weight: normal; }
+.ac-name { color: var(--muted); }
+.ac-link { color: var(--cyan); font-style: italic; }
+
+/* typed command text: white on blue (real command line) */
+#cmd-wrap { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; }
+#cmd { position: relative; z-index: 2; color: transparent; caret-color: #fff; width: 100%; }
+#cmd::placeholder { color: #5a5033; }
+#cmd-mirror {
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 1;
+  font-family: var(--font-mono); font-size: 13px; color: #fff; background: #17418f;
+  white-space: pre; pointer-events: none; letter-spacing: 0;
+}
+#cmd-mirror:empty { background: transparent; }
+
+/* security MENU screen (numbered function menu with breadcrumb) */
+.menu-crumb {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  border: 1px solid var(--white); margin: 4px 6px; padding: 2px 8px;
+  color: var(--white); font-size: 12.5px; flex-shrink: 0; font-family: var(--font-data);
+}
+.menu-cancel { color: var(--white); cursor: pointer; white-space: nowrap; }
+.menu-cancel:hover { color: var(--red-down); }
+.menu-body { flex: 1; min-height: 0; overflow: auto; columns: 2; column-gap: 28px; padding: 6px 18px; }
+.menu-grp { break-inside: avoid; margin-bottom: 12px; }
+.menu-grp-t { color: var(--white); font-weight: bold; font-size: 12.5px; margin-bottom: 2px; font-family: var(--font-data); }
+.menu-item { display: flex; gap: 8px; align-items: baseline; padding: 1px 4px; cursor: pointer; font-size: 12.5px; font-family: var(--font-data); }
+.menu-item:hover { background: var(--navy-sel); }
+.mi-n { color: var(--white); min-width: 24px; text-align: right; }
+.mi-c { color: var(--white); font-weight: bold; min-width: 44px; }
+.mi-d { color: var(--orange); }
+
+/* suggested-functions bar: taller segmented (OWN reference) */
+#suggest { height: 26px; font-size: 12px; gap: 0; padding: 0; }
+#suggest .nav { padding: 0 6px; }
+.sg-l { color: var(--orange); font-weight: bold; padding: 0 12px; border-right: 1px solid var(--grid-soft); height: 100%; display: inline-flex; align-items: center; flex-shrink: 0; }
+.sg-item { color: var(--muted); padding: 0 14px; border-right: 1px solid var(--grid-soft); height: 100%; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sg-item b { color: var(--white); font-size: 12.5px; }
+
+/* news headlines are ORANGE on the real Terminal */
+.news-item a { color: var(--orange); }
+.news-item a:hover { color: var(--yellow); }
+
+/* bottom promo/media banner (both real refs show these) */
+#promo {
+  height: 20px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 10px; cursor: pointer; overflow: hidden;
+}
+.promo-t { color: #fff; font-weight: bold; font-size: 12.5px; letter-spacing: 0.3px; white-space: nowrap; }
+.promo-tag { color: #fff; background: rgba(0,0,0,0.55); font-weight: bold; font-size: 11px; padding: 1px 8px; flex-shrink: 0; }
+
+/* per-row day-range bars (monitor-wall reference) */
+.rng { position: relative; display: inline-block; width: 64px; height: 9px; background: #10161e; border: 1px solid var(--grid-soft); vertical-align: middle; }
+.rng-fill { position: absolute; top: 1px; bottom: 1px; }
+.rng-fill.up { background: var(--green-fill); }
+.rng-fill.dn { background: var(--red-down); }
+
+/* launchpad component header: Options affordance (modern Launchpad ref) */
+.lp-head::after { content: '≡ Options'; margin-left: auto; color: var(--muted); font-weight: normal; font-size: 9px; letter-spacing: 0; }
 
 /* -------------------------------------------------- PROP (film/TV) mode */
 

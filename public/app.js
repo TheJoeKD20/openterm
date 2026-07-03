@@ -144,6 +144,11 @@ const SEC_FUNCS = [
   ['HP', 'Hist Prices'], ['BQ', 'Quote'],
 ];
 
+function syncMirror() {
+  const m = el('cmd-mirror'), c = el('cmd');
+  if (m && c) m.textContent = (c.value || '').toUpperCase();
+}
+
 /* -------------------------------------------------------------- msg */
 
 function msg(text, isError = false) {
@@ -243,14 +248,15 @@ function renderSecHeader(q) {
   c.className = chgClass(q.change);
   flashEl(p, tickDir('HDR:' + q.symbol, q.price));
   // real Terminal quote-line grammar: squiggle · N bid/ask N size · At · Vol · OHL · Val
+  const ql = (k, v) => `<span class="ql-k">${k}</span> <span class="ql-v">${v}</span>`;
   el('sec-detail').innerHTML =
     `<canvas id="sec-squig" width="120" height="26" style="width:60px;height:13px;vertical-align:-2px"></canvas>`
-    + ` <span id="sec-ba" class="hl">N —/— N</span>`
-    + ` · At ${q.marketTime ? new Date(q.marketTime * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'} d`
-    + ` · Vol ${fmtBig(q.volume)}`
-    + ` · O ${fmtPrice(q.open)}N · H ${fmtPrice(q.dayHigh)}N · L ${fmtPrice(q.dayLow)}D`
-    + ` · Val ${q.price && q.volume ? fmtBig(q.price * q.volume) : '—'}`
-    + ` · ${esc([q.exchange, q.currency].filter(Boolean).join(' · '))}`;
+    + ` <span id="sec-ba" class="ql-v">N —/— N</span>`
+    + ` · ${ql('At', (q.marketTime ? new Date(q.marketTime * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—') + ' d')}`
+    + ` · ${ql('Vol', fmtBig(q.volume))}`
+    + ` · ${ql('O', fmtPrice(q.open) + 'P')} ${ql('H', fmtPrice(q.dayHigh) + 'K')} ${ql('L', fmtPrice(q.dayLow) + 'D')}`
+    + ` · ${ql('Val', q.price && q.volume ? fmtBig(q.price * q.volume) : '—')}`
+    + ` · <span class="muted">${esc([q.exchange, q.currency].filter(Boolean).join(' · '))}</span>`;
   api(`/api/spark?symbols=${encodeURIComponent(q.symbol)}&range=1d`).then((d) => {
     const sp = d[q.symbol], c = el('sec-squig');
     if (sp && c) drawSpark(c, sp.close, sp.prev);
@@ -344,7 +350,7 @@ function markFunc(code) {
   if (code && state.symbol) setChrome(`${state.symbol} US Equity`, code);
   if (code && state.symbol) setTab(`${code} ${state.symbol} US Equity`, `${state.symbol} ${code}`);
   if (code && state.symbol && ['GP', 'GIP', 'DES', 'FA', 'ERN', 'CN'].includes(code)) {
-    setSuggest('<span class="sg">Suggested Functions &nbsp; <b>DES</b> Description &nbsp;·&nbsp; <b>GP</b> Graph &nbsp;·&nbsp; <b>FA</b> Fundamentals &nbsp;·&nbsp; <b>ERN</b> Earnings &nbsp;·&nbsp; <b>CN</b> News</span>');
+    setSuggest('<span class="sg-l">Suggested Functions</span><span class="sg-item"><b>DES</b> Study in-depth information on a security</span><span class="sg-item"><b>FA</b> Get insight into a company\'s fundamentals</span><span class="sg-item"><b>ANR</b> See analyst recommendations</span>');
   } else {
     setSuggest('');
   }
@@ -363,6 +369,7 @@ function runFunc(code) {
   if (code === 'DVD') return showDVD();
   if (code === 'HP') return showHP();
   if (code === 'BQ') return showBQ();
+  if (code === 'MENU') return showMenu();
   return showChart('6mo');
 }
 
@@ -401,11 +408,14 @@ async function showChart(range) {
       <span class="tb-sep"></span>
       <button class="tb-btn mav-btn">MAV</button>
       <button class="tb-btn dis">COMPARE</button><button class="tb-btn dis">EVENTS</button><button class="tb-btn dis">NEWS</button>
+      <span class="tb-sep"></span>
+      <span id="gp-dates"></span>
+      <button class="tb-btn dis" style="margin-left:auto">TABLE</button><button class="tb-btn dis">« CHART CONTENT</button>
     </div>
     <div id="gp-main">
       <div id="gp-chartcol">
-        <div id="chart-wrap"><canvas id="chart"></canvas></div>
-        <div id="chart-sub"><canvas id="chart-vol"></canvas></div>
+        <div id="chart-wrap"><div id="gp-tools">✥<br>✎<br>T<br>∿<br>▦<br>⊕<br>⌖</div><canvas id="chart"></canvas></div>
+        <div id="chart-sub"><div id="vol-head"></div><canvas id="chart-vol"></canvas></div>
         <div id="chart-legend"></div>
       </div>
       <div id="gp-side"><div class="loading">…</div></div>
@@ -449,6 +459,14 @@ function renderGPmeta(meta) {
   const vol = c.reduce((a, x) => a + (x.v || 0), 0);
   const q = state.quote || {};
   const cell = (k, v, cls = '') => `<span class="gpm"><span class="gpm-k">${k}</span> <span class="gpm-v ${cls}">${v}</span></span>`;
+  const dts = el('gp-dates');
+  if (dts && c.length) {
+    const d0 = new Date(c[0].t * 1000), d1 = new Date(c[c.length - 1].t * 1000);
+    const fd = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${String(d.getFullYear()).slice(2)}`;
+    dts.innerHTML = `<span class="gp-date">${fd(d0)} ▦</span><span class="muted">–</span><span class="gp-date">${fd(d1)} ▦</span>`;
+  }
+  const vh = el('vol-head');
+  if (vh) vh.textContent = `${state.symbol} US Equity - Volume ${fmtBig((state.quote || {}).volume)}`;
   el('gp-metabar').innerHTML =
     cell('Rng', state.range.toUpperCase()) + cell('Cur', meta.currency || 'USD')
     + cell('Last', fmtPrice(last.c), chgClass(q.change))
@@ -537,6 +555,9 @@ function drawChart() {
   const M = { top: 10, right: 58, bottom: 18, left: 6 };
   const priceH = H - M.top - M.bottom;
   const plotW = W - M.left - M.right;
+  // real GP: plot area slightly lifted from pure black (sampled #151518)
+  ctx.fillStyle = '#151518';
+  ctx.fillRect(M.left, M.top, plotW, priceH);
   const n = candles.length;
   const ma20 = movingAvg(candles, 20), ma50 = movingAvg(candles, 50);
 
@@ -598,6 +619,29 @@ function drawChart() {
     const y = yAt(state.quote.prevClose);
     ctx.strokeStyle = '#3a4a58'; ctx.setLineDash([3, 3]);
     ctx.beginPath(); ctx.moveTo(M.left, y); ctx.lineTo(W - M.right, y); ctx.stroke(); ctx.setLineDash([]);
+  }
+  // last-price tag pinned to the right axis (real GP)
+  {
+    const lastC = candles[n - 1].c, ly = yAt(lastC);
+    ctx.fillStyle = '#f6a313';
+    ctx.fillRect(W - M.right + 1, ly - 7, M.right - 2, 14);
+    ctx.fillStyle = '#000'; ctx.textAlign = 'left';
+    ctx.fillText(fmtPrice(lastC), W - M.right + 4, ly);
+  }
+  // in-plot legend, top-left (swatch + security + studies)
+  {
+    let lx = M.left + 8;
+    const item = (color, label) => {
+      ctx.fillStyle = color; ctx.fillRect(lx, M.top + 5, 7, 7);
+      ctx.fillStyle = '#e8edf5'; ctx.textAlign = 'left';
+      ctx.fillText(label, lx + 11, M.top + 9);
+      lx += 11 + ctx.measureText(label).width + 16;
+    };
+    item(state.chartType === 'line' || n > 320 ? '#f6a313' : '#e8edf5', `${state.symbol} US Equity (R1) ${fmtPrice(candles[n - 1].c)}`);
+    if (state.showMA) {
+      item('#ffe45c', `MA(20) ${fmtPrice(ma20[n - 1])}`);
+      item('#4ec8ff', `MA(50) ${fmtPrice(ma50[n - 1])}`);
+    }
   }
   if (hoverIdx >= 0 && hoverIdx < n) {
     const c = candles[hoverIdx], x = xAt(hoverIdx), y = yAt(c.c);
@@ -778,7 +822,7 @@ function renderFAShell() {
     + `</div>`;
   el('view').querySelectorAll('.fa-tab').forEach((b) =>
     b.addEventListener('click', () => { faCache.tab = b.dataset.tab; renderFAShell(); loadFATab(); }));
-  setSuggest('<span class="sg">Suggested Functions &nbsp; <b>FA</b> Financial Analysis &nbsp;·&nbsp; <b>EVTS</b> Company Events &nbsp;·&nbsp; <b>MODL</b> Earnings Model &nbsp;·&nbsp; <b>ERN</b> Earnings &nbsp;·&nbsp; <b>DES</b> Description</span>');
+  setSuggest('<span class="sg-l">Suggested Functions</span><span class="sg-item"><b>ERN</b> Review earnings and estimates</span><span class="sg-item"><b>DVD</b> Track dividend history</span><span class="sg-item"><b>HDS</b> See security ownership</span>');
 }
 
 async function loadFATab() {
@@ -1359,18 +1403,28 @@ async function showWatchlist() {
   if (!state.watchlist.length) { el('wl-body').innerHTML = '<div class="muted" style="padding:12px">Watchlist empty. Add with <span class="hl">W ADD NVDA</span>.</div>'; return; }
   try {
     const quotes = await api(`/api/quotes?symbols=${encodeURIComponent(state.watchlist.join(','))}`);
+    const rngBar = (q) => {
+      if (q.dayLow == null || q.dayHigh == null || q.dayHigh <= q.dayLow) return '<span class="muted">—</span>';
+      const lo = q.dayLow, hi = q.dayHigh, span = hi - lo;
+      const a = Math.max(lo, Math.min(q.open ?? q.price, q.price));
+      const b = Math.min(hi, Math.max(q.open ?? q.price, q.price));
+      const left = ((a - lo) / span) * 100, width = Math.max(3, ((b - a) / span) * 100);
+      const up = q.price >= (q.open ?? q.prevClose ?? q.price);
+      return `<span class="rng"><span class="rng-fill ${up ? 'up' : 'dn'}" style="left:${left}%;width:${width}%"></span></span>`;
+    };
     el('wl-body').innerHTML = `<div class="tbl-wrap"><table class="data">
-      <tr><th>SYM</th><th>NAME</th><th class="num">LAST</th><th class="num">CHG</th><th class="num">CHG%</th><th>1D</th><th class="num">VOLUME</th><th></th></tr>
+      <tr><th>SYM</th><th>NAME</th><th class="num">LAST</th><th class="num">CHG</th><th class="num">CHG%</th><th>1D</th><th>DAY RNG</th><th class="num">VOLUME</th><th></th></tr>
       ${quotes.map((q) => q.error
-        ? `<tr><td class="sym">${esc(q.symbol)}</td><td class="neg" colspan="7">unavailable</td></tr>`
+        ? `<tr><td class="sym">${esc(q.symbol)}</td><td class="neg" colspan="8">unavailable</td></tr>`
         : `<tr class="click" data-sym="${esc(q.symbol)}">
             <td class="sym">${esc(q.symbol)}</td><td class="muted">${esc((q.name || '').slice(0, 30))}</td>
             <td class="num">${fmtPrice(q.price)}</td>
             <td class="num ${chgClass(q.change)}">${arrow(q.change)} ${fmtNum(Math.abs(q.change))}</td>
             <td class="num ${chgClass(q.change)}">${fmtNum(Math.abs(q.changePct))}%</td>
             <td class="spark-td">${sparkCell(q.symbol)}</td>
+            <td>${rngBar(q)}</td>
             <td class="num">${fmtBig(q.volume)}</td>
-            <td class="num"><button class="wl-del" data-del="${esc(q.symbol)}" style="background:transparent;border:1px solid var(--line);color:var(--red);font-size:10px;padding:0 6px">✕</button></td>
+            <td class="num"><button class="wl-del" data-del="${esc(q.symbol)}" style="background:transparent;border:1px solid var(--border);color:var(--red-down);font-size:10px;padding:0 6px">✕</button></td>
           </tr>`).join('')}
     </table></div>`;
     wireRows(el('wl-body'));
@@ -1654,7 +1708,10 @@ async function showANR() {
 async function showHDS() {
   if (!state.symbol) { msg('Load a security first', true); return; }
   setActiveTabs(null); markFunc('HDS');
-  el('view').innerHTML = `<div class="fa-screen">` + fnBar('SECURITY OWNERSHIP', 'HDS', eqBox()) + `<div class="mon-grid cols-2 tfill">
+  const idName = (state.quote && state.quote.name ? state.quote.name : state.symbol).toUpperCase();
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('SECURITY OWNERSHIP', 'HDS', eqBox())
+    + `<div class="ident-line">${esc(idName)} <span class="muted" style="margin-left:14px">ID</span> ${esc(state.symbol)}-US</div>`
+    + `<div class="mon-grid cols-2 tfill">
     <div class="section">${secBar('OWNERSHIP BREAKDOWN')}<div class="sec-body" id="hds-b"><div class="loading">…</div></div></div>
     <div class="section">${secBar('INSIDER HOLDERS')}<div class="sec-body pad0" id="hds-i"><div class="loading">…</div></div></div>
     <div class="section">${secBar('TOP INSTITUTIONAL HOLDERS')}<div class="sec-body pad0" id="hds-inst"><div class="loading">…</div></div></div>
@@ -1664,10 +1721,10 @@ async function showHDS() {
     const h = await api(`/api/holders/${encodeURIComponent(state.symbol)}`);
     const row = (k, v, cls = '') => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${cls}">${v}</span></div>`;
     el('hds-b').innerHTML = `<div class="kv-grid" style="grid-template-columns:1fr">
-      ${row('% Held by Insiders', h.breakdown.insidersPct != null ? fmtPct(h.breakdown.insidersPct * 100) : '—', 'hl')}
-      ${row('% Held by Institutions', h.breakdown.institutionsPct != null ? fmtPct(h.breakdown.institutionsPct * 100) : '—', 'hl')}
-      ${row('% of Float (Institutions)', h.breakdown.institutionsFloatPct != null ? fmtPct(h.breakdown.institutionsFloatPct * 100) : '—')}
-      ${row('# Institutions', fmtRatio(h.breakdown.institutionsCount, 0))}
+      ${row('11) % Held by Insiders', h.breakdown.insidersPct != null ? fmtPct(h.breakdown.insidersPct * 100) : '—', 'hl')}
+      ${row('12) % Held by Institutions', h.breakdown.institutionsPct != null ? fmtPct(h.breakdown.institutionsPct * 100) : '—', 'hl')}
+      ${row('13) % of Float (Institutions)', h.breakdown.institutionsFloatPct != null ? fmtPct(h.breakdown.institutionsFloatPct * 100) : '—')}
+      ${row('14) # of Institutions', fmtRatio(h.breakdown.institutionsCount, 0))}
     </div>`;
     const ownTable = (list) => `<div class="tbl-wrap"><table class="data">
       <tr><th>HOLDER</th><th class="num">SHARES</th><th class="num">%HELD</th><th class="num">VALUE</th><th class="num">Δ%</th><th>AS OF</th></tr>
@@ -1915,6 +1972,50 @@ async function showNI(topic) {
   } catch (err) { el('ni-body').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 
+/* ---- MENU: security function menu (numbered, orange descriptions) */
+const MENU_GROUPS = [
+  ['Company Overview', [
+    ['DES', 'Security Description'], ['CN', 'Company News'], ['ANR', 'Analyst Recommendations'],
+    ['HDS', 'Security Ownership'], ['DVD', 'Dividend / Split Summary'],
+  ]],
+  ['Charts, Tables & Technicals >', [
+    ['GP', 'Line / Candle Chart'], ['GIP', 'Intraday Price Chart'], ['HP', 'Historical Price Table'], ['BQ', 'Bloomberg Quote'],
+  ]],
+  ['Financial Analysis >', [
+    ['FA', 'Financial Analysis'], ['ERN', 'Earnings & Estimates'],
+  ]],
+  ['Idea Generation', [
+    ['EQS', 'Equity Screening'], ['GMM', 'Global Macro Movers'], ['WEI', 'World Equity Indices'], ['MOST', 'Most Active Securities'],
+  ]],
+];
+
+function showMenu() {
+  if (!state.symbol) { msg('Load a security first', true); return; }
+  setActiveTabs(null); markFunc('MENU');
+  let n = 0;
+  const cols = MENU_GROUPS.map(([grp, items]) => `
+    <div class="menu-grp">
+      <div class="menu-grp-t">${esc(grp)}</div>
+      ${items.map(([code, desc]) => { n++; return `
+        <div class="menu-item" data-func="${code}">
+          <span class="mi-n">${n})</span><span class="mi-c">${code}</span><span class="mi-d">${esc(desc)}</span>
+        </div>`; }).join('')}
+    </div>`).join('');
+  el('view').innerHTML = `<div class="fa-screen">
+    <div class="menu-crumb">
+      <span>⌂ <i>Main Menu of Bloomberg-Style Functions &gt; Equity Markets &gt; Analyze&nbsp; ${esc(state.symbol)} US Equity</i></span>
+      <span class="menu-cancel" id="menu-cancel">&lt;Cancel&gt; ✕</span>
+    </div>
+    <div class="menu-body">${cols}</div>
+  </div>`;
+  el('menu-cancel').addEventListener('click', () => runFunc(state.func === 'MENU' ? 'GP' : state.func || 'GP'));
+  el('view').querySelectorAll('.menu-item').forEach((it) => it.addEventListener('click', () => {
+    const fn = it.dataset.func;
+    if (['EQS', 'GMM', 'WEI', 'MOST'].includes(fn)) return runCommand(fn);
+    runFunc(fn);
+  }));
+}
+
 /* ============================ PROP: film/TV mode ============================ */
 /* Exaggerated "movie Bloomberg" set-dressing: CRT scanlines + glow +
    oversaturation, constant tick-storms, dramatic price alerts, and an
@@ -2117,6 +2218,8 @@ function runNumbered(n) {
     const b = document.querySelector(`.fn-act[data-act="${n === 96 ? 'actions' : n === 97 ? 'export' : 'settings'}"]`);
     return b ? b.click() : msg(`No ${n}) action here`, true);
   }
+  const mi = document.querySelectorAll('.menu-item');
+  if (mi.length && n >= 1 && n <= mi.length) return mi[n - 1].click();
   const fa = document.querySelectorAll('.fa-tabs .fa-tab');
   if (fa.length && n >= 1 && n <= fa.length) return fa[n - 1].click();
   const sf = document.querySelectorAll('#sec-funcs .sec-func');
@@ -2137,7 +2240,7 @@ function runCommand(raw, opts = {}) {
   // MENU acts as back; FWD replays
   if (head === 'MENU' || head === 'BACK') {
     if (navStack.length >= 2) { fwdStack.push(navStack.pop()); return runCommand(navStack[navStack.length - 1], { noPush: true }); }
-    return runCommand('HOME', { noPush: true });
+    return state.symbol ? showMenu() : runCommand('HOME', { noPush: true });
   }
   if (head === 'FWD' || head === 'FORWARD') {
     const nxt = fwdStack.pop();
@@ -2189,7 +2292,7 @@ function runCommand(raw, opts = {}) {
   }
 
   // bare per-security functions act on the loaded security
-  const secFns = ['DES', 'GP', 'GIP', 'FA', 'ERN', 'CN', 'N', 'ANR', 'HDS', 'DVD', 'HP', 'BQ'];
+  const secFns = ['DES', 'GP', 'GIP', 'FA', 'ERN', 'CN', 'N', 'ANR', 'HDS', 'DVD', 'HP', 'BQ', 'MENU'];
   if (secFns.includes(head) && !rest.length) {
     if (!state.symbol) return msg('Load a security first — e.g. AAPL', true);
     return runFunc(head === 'N' ? 'CN' : head);
@@ -2245,19 +2348,33 @@ function yellowTag(t) {
 
 function hideAC() { el('autocomplete').classList.add('hidden'); acItems = []; acSel = -1; }
 function acPick(item) {
-  hideAC(); el('cmd').value = '';
+  hideAC(); el('cmd').value = ''; syncMirror();
   if (item.t === 'fn') runCommand(item.code);
+  else if (item.t === 'search') showSearch(item.q);
   else loadSecurity(item.symbol, 'GP');
 }
 function renderAC() {
   const box = el('autocomplete');
   if (!acItems.length) return hideAC();
-  box.innerHTML = acItems.map((q, i) => (q.t === 'fn'
-    ? `<div class="ac-row ${i === acSel ? 'sel' : ''}" data-i="${i}">
-        <span class="ac-sym blue">${esc(q.code)}</span><span class="ac-name">${esc(q.name)}</span><span class="ac-key fn">Function</span></div>`
-    : `<div class="ac-row ${i === acSel ? 'sel' : ''}" data-i="${i}">
-        <span class="ac-sym">${esc(q.symbol)}</span><span class="ac-name">${esc(q.name)}</span>
-        <span class="ac-exch">${esc(q.exchange || '')}</span><span class="ac-key">${yellowTag(q.type)}</span></div>`)).join('');
+  const row = (q, i) => {
+    if (q.t === 'fn') return `<div class="ac-row ${i === acSel ? 'sel' : ''}" data-i="${i}">
+      <span class="ac-sym">${esc(q.code)}</span><span class="ac-name">${esc(q.name)}</span></div>`;
+    if (q.t === 'search') return `<div class="ac-row ac-search ${i === acSel ? 'sel' : ''}" data-i="${i}">
+      <span class="ac-link">Search for '${esc(q.q)}'…</span></div>`;
+    return `<div class="ac-row ${i === acSel ? 'sel' : ''}" data-i="${i}">
+      <span class="ac-sym">${esc(q.symbol)} <span class="ac-yk">${yellowTag(q.type)}</span></span>
+      <span class="ac-name">${esc(q.name)}</span><span class="ac-exch">${esc(q.exchange || '')}</span></div>`;
+  };
+  let html = `<div class="ac-hint">&lt;UP ARROW&gt; to hide<span>Autocomplete</span></div>`;
+  let started;
+  const section = (label, items) => {
+    if (!items.length) return '';
+    return `<div class="ac-head">${label}</div>` + items.map(([q, i]) => row(q, i)).join('');
+  };
+  const fns = [], secs = [], srch = [];
+  acItems.forEach((q, i) => (q.t === 'fn' ? fns : q.t === 'search' ? srch : secs).push([q, i]));
+  html += section('FUNCTIONS', fns) + section('SECURITIES', secs) + section('SEARCH', srch);
+  box.innerHTML = html;
   box.classList.remove('hidden');
   box.querySelectorAll('.ac-row').forEach((r) => r.addEventListener('mousedown', (e) => {
     e.preventDefault(); acPick(acItems[parseInt(r.dataset.i, 10)]);
@@ -2273,9 +2390,9 @@ function onCmdInput() {
   acTimer = setTimeout(async () => {
     try {
       const d = await api(`/api/search?q=${encodeURIComponent(v)}`);
-      acItems = [...fns, ...d.quotes.slice(0, 7)];
+      acItems = [...fns, ...d.quotes.slice(0, 7), { t: 'search', q: v }];
       acSel = -1; renderAC();
-    } catch { acItems = fns; acSel = -1; renderAC(); }
+    } catch { acItems = [...fns, { t: 'search', q: v }]; acSel = -1; renderAC(); }
   }, 200);
 }
 
@@ -2338,8 +2455,25 @@ function buildKeybar() {
 
 /* --------------------------------------------------------------- init */
 
+const PROMOS = [
+  { bg: '#00b8a3', txt: 'Screen on the factors that matter.', tag: 'EQS', cmd: 'EQS' },
+  { bg: '#0b87d8', txt: "News Trends: What's Moving the Market?", tag: 'TOP', cmd: 'TOP' },
+  { bg: '#7a2fa0', txt: 'Assess worldwide interest rates and money markets.', tag: 'BTMM', cmd: 'BTMM' },
+  { bg: '#b8860b', txt: 'Chart anything. Candles, studies, moving averages.', tag: 'GP', cmd: 'GP' },
+];
+let promoIdx = 0;
+function rotatePromo() {
+  const pr = el('promo'); if (!pr) return;
+  const it = PROMOS[promoIdx % PROMOS.length]; promoIdx++;
+  pr.style.background = it.bg;
+  pr.innerHTML = `<span class="promo-t">${esc(it.txt)}</span><span class="promo-tag">${esc(it.tag)} ⟩</span>`;
+  pr.onclick = () => runCommand(it.cmd);
+}
+
 function init() {
   buildKeybar();
+  rotatePromo();
+  setInterval(rotatePromo, 22000);
   showLaunchpad();
   refreshTape();
   loadTicker();
@@ -2361,7 +2495,8 @@ function init() {
   if (arrows[1]) arrows[1].addEventListener('click', () => runCommand('FWD'));
 
   const cmd = el('cmd');
-  cmd.addEventListener('input', onCmdInput);
+  cmd.addEventListener('input', () => { syncMirror(); onCmdInput(); });
+  setInterval(syncMirror, 400);
   cmd.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown' && acItems.length) { e.preventDefault(); acSel = (acSel + 1) % acItems.length; renderAC(); }
     else if (e.key === 'ArrowUp' && acItems.length) { e.preventDefault(); acSel = (acSel - 1 + acItems.length) % acItems.length; renderAC(); }

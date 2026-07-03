@@ -30,9 +30,12 @@
     <!-- 2) command entry strip -->
     <div id="cmdbar">
       <span id="cmd-caret">&gt;</span>
-      <input id="cmd" type="text" autocomplete="off" autocapitalize="characters"
-             spellcheck="false" enterkeyhint="go"
-             placeholder="Enter command  ·  AAPL FA · MSFT DES · NVDA GP · WEI · MOST · CRYP · HELP">
+      <span id="cmd-wrap">
+        <span id="cmd-mirror"></span>
+        <input id="cmd" type="text" autocomplete="off" autocapitalize="characters"
+               spellcheck="false" enterkeyhint="go"
+               placeholder="Enter command  ·  AAPL FA · MSFT DES · NVDA GP · WEI · MOST · CRYP · HELP">
+      </span>
       <button id="go-btn">&lt;GO&gt;</button>
       <button id="help-btn" data-cmd="HELP">HELP</button>
     </div>
@@ -62,6 +65,9 @@
 
     <!-- 7) color-coded function keys -->
     <div id="keybar"></div>
+
+    <!-- 7b) bottom promo banner (real terminals show these media strips) -->
+    <div id="promo"></div>
 
     <!-- 8) status / news ticker line -->
     <div id="statusline">
