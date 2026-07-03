@@ -73,15 +73,16 @@ function drawSpark(canvas, closes, prev) {
   const x = (i) => (i / (closes.length - 1)) * (W - 1) + 0.5;
   const y = (v) => H - ((v - lo) / (hi - lo)) * (H - 2) - 1;
   const up = closes[closes.length - 1] >= (prev ?? closes[0]);
+  // faint technical grid
+  cx.strokeStyle = '#0e1a24'; cx.lineWidth = 1;
+  cx.beginPath(); cx.moveTo(0, Math.round(H / 2) + 0.5); cx.lineTo(W, Math.round(H / 2) + 0.5); cx.stroke();
   if (prev != null) {
-    cx.strokeStyle = 'rgba(140,146,166,0.4)'; cx.setLineDash([2, 2]);
+    cx.strokeStyle = 'rgba(135,148,163,0.35)'; cx.setLineDash([2, 2]);
     cx.beginPath(); cx.moveTo(0, y(prev)); cx.lineTo(W, y(prev)); cx.stroke(); cx.setLineDash([]);
   }
   cx.beginPath();
   closes.forEach((v, i) => (i ? cx.lineTo(x(i), y(v)) : cx.moveTo(x(i), y(v))));
-  cx.strokeStyle = up ? '#33dd88' : '#ff4b4b'; cx.lineWidth = 1.2; cx.stroke();
-  cx.lineTo(x(closes.length - 1), H); cx.lineTo(x(0), H); cx.closePath();
-  cx.fillStyle = up ? 'rgba(51,221,136,0.14)' : 'rgba(255,75,75,0.14)'; cx.fill();
+  cx.strokeStyle = up ? '#00c853' : '#ff3d57'; cx.lineWidth = 1; cx.lineCap = 'butt'; cx.lineJoin = 'miter'; cx.stroke();
 }
 
 async function fillSparks(container, range = '1d') {
@@ -405,21 +406,21 @@ function drawChart() {
   const bw = Math.max(1, (plotW / n) * 0.7);
   for (let i = 0; i < n; i++) {
     const c = candles[i], h = maxV ? (c.v / maxV) * volH : 0;
-    ctx.fillStyle = c.c >= c.o ? 'rgba(51,221,136,0.32)' : 'rgba(255,75,75,0.32)';
+    ctx.fillStyle = c.c >= c.o ? 'rgba(0,200,83,0.32)' : 'rgba(255,61,87,0.32)';
     ctx.fillRect(xAt(i) - bw / 2, volTop + volH - h, bw, h);
   }
   if (state.chartType === 'line' || n > 240) {
     ctx.beginPath();
     for (let i = 0; i < n; i++) { const x = xAt(i), y = yAt(candles[i].c); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-    ctx.strokeStyle = '#ff7a00'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.strokeStyle = '#f6a313'; ctx.lineWidth = 1.5; ctx.stroke();
     ctx.lineTo(xAt(n - 1), M.top + priceH); ctx.lineTo(xAt(0), M.top + priceH); ctx.closePath();
     const g = ctx.createLinearGradient(0, M.top, 0, M.top + priceH);
-    g.addColorStop(0, 'rgba(255,122,0,0.20)'); g.addColorStop(1, 'rgba(255,122,0,0)');
+    g.addColorStop(0, 'rgba(246,163,19,0.18)'); g.addColorStop(1, 'rgba(246,163,19,0)');
     ctx.fillStyle = g; ctx.fill(); ctx.lineWidth = 1;
   } else {
     for (let i = 0; i < n; i++) {
       const c = candles[i], x = xAt(i), up = c.c >= c.o;
-      ctx.strokeStyle = ctx.fillStyle = up ? '#33dd88' : '#ff4b4b';
+      ctx.strokeStyle = ctx.fillStyle = up ? '#00c853' : '#ff3d57';
       ctx.beginPath(); ctx.moveTo(x, yAt(c.h)); ctx.lineTo(x, yAt(c.l)); ctx.stroke();
       const top = yAt(Math.max(c.o, c.c)), bh = Math.max(1, Math.abs(yAt(c.o) - yAt(c.c)));
       ctx.fillRect(x - bw / 2, top, bw, bh);
@@ -432,10 +433,10 @@ function drawChart() {
   }
   if (hoverIdx >= 0 && hoverIdx < n) {
     const c = candles[hoverIdx], x = xAt(hoverIdx), y = yAt(c.c);
-    ctx.strokeStyle = 'rgba(255,122,0,0.6)'; ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = 'rgba(246,163,19,0.6)'; ctx.setLineDash([3, 3]);
     ctx.beginPath(); ctx.moveTo(x, M.top); ctx.lineTo(x, volTop + volH); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(M.left, y); ctx.lineTo(W - M.right, y); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = '#ff7a00'; ctx.textAlign = 'left'; ctx.fillText(fmtPrice(c.c), W - M.right + 5, y);
+    ctx.fillStyle = '#f6a313'; ctx.textAlign = 'left'; ctx.fillText(fmtPrice(c.c), W - M.right + 5, y);
     el('chart-legend').innerHTML =
       `${esc(xLabel(c.t, intraday))}  O:<span class="flat">${fmtPrice(c.o)}</span> H:<span class="pos">${fmtPrice(c.h)}</span> L:<span class="neg">${fmtPrice(c.l)}</span> C:<span class="${chgClass(c.c - c.o)}">${fmtPrice(c.c)}</span> VOL:${fmtBig(c.v)}`;
   } else {
@@ -507,13 +508,17 @@ function showFA() {
   loadFATab();
 }
 
+const FA_TABS2 = ['11) BBG Adj Highlights', '12) BBG GAAP Highlights', '13) Company Model', '14) Earnings', '15) Enterprise Value', '16) Multiples', '17) Per Share', '18) Stock Value'];
+
 function renderFAShell() {
   const periods = faCache.fin ? faCache.fin.years.length : 4;
-  const controls = `<span class="fn-ctrl"><b>Periods</b> ${periods} Annuals ▾</span><span class="fn-ctrl"><b>Cur</b> USD ▾</span>`;
+  const controls = `<span class="fn-ctrl"><b>ASC 842</b> ?</span><span class="fn-ctrl">Adjusted ▾</span>`
+    + `<span class="fn-ctrl"><b>Periods</b> ${periods} Annuals ▾</span><span class="fn-ctrl"><b>Cur</b> USD ▾</span>`;
   el('view').innerHTML = `<div class="fa-screen">`
     + fnBar('FINANCIAL ANALYSIS', 'FA', eqBox(), controls)
     + `<div class="fa-tabs">${FA_TABS.map(([k, l], i) =>
         `<button class="fa-tab ${k === faCache.tab ? 'active' : ''}" data-tab="${k}"><span class="n">${i + 1})</span>${l}</button>`).join('')}</div>`
+    + `<div class="tabrow">${FA_TABS2.map((t) => `<button class="tabrow-tab disabled">${esc(t)}</button>`).join('')}</div>`
     + `<div id="fa-body"><div class="loading">Loading…</div></div>`
     + `</div>`;
   el('view').querySelectorAll('.fa-tab').forEach((b) =>
@@ -546,15 +551,16 @@ function fmtFin(v, label) {
 
 // sections = [{ label, rows:[{label, values, fmt?}] }]
 function statementTable(years, sections, unit) {
-  const head = `<tr><th class="fin-unit">${esc(unit)}</th>${years.map((y) => `<th class="num">${esc(y)} Y</th>`).join('')}</tr>`
-    + `<tr><th class="fin-unit muted" style="font-size:10px">12 Months Ending</th>${years.map((y) => `<th class="num muted" style="font-size:10px">12/31/${esc(y)}</th>`).join('')}</tr>`;
+  const hi = (i) => (i === 0 ? ' col-hi' : '');
+  const head = `<tr><th class="fin-unit">${esc(unit)}</th>${years.map((y, i) => `<th class="num${hi(i)}">${esc(y)} Y</th>`).join('')}</tr>`
+    + `<tr><th class="fin-unit muted" style="font-size:10px">12 Months Ending</th>${years.map((y, i) => `<th class="num muted${hi(i)}" style="font-size:10px">12/31/${esc(y)}</th>`).join('')}</tr>`;
   const bodyHTML = sections.map((sec) => {
-    const grp = `<tr class="grp"><td class="fin-label">${esc(sec.label)}</td>${years.map(() => '<td></td>').join('')}</tr>`;
+    const grp = `<tr class="grp"><td class="fin-label"><span class="tri-c">▼</span>${esc(sec.label)}</td>${years.map((_, i) => `<td class="${hi(i)}"></td>`).join('')}</tr>`;
     const rows = sec.rows.map((r) => `<tr>
       <td class="fin-label indent">${GLYPH}<span>${esc(r.label)}</span></td>
-      ${r.values.map((v) => (v == null
-        ? '<td class="dash">–</td>'
-        : `<td class="num">${r.fmt ? r.fmt(v) : fmtFin(v, r.label)}</td>`)).join('')}
+      ${r.values.map((v, i) => (v == null
+        ? `<td class="dash${hi(i)}">–</td>`
+        : `<td class="num${hi(i)}">${r.fmt ? r.fmt(v) : fmtFin(v, r.label)}</td>`)).join('')}
     </tr>`).join('');
     return grp + rows;
   }).join('');
@@ -568,40 +574,85 @@ function derivedSections(fin, which) {
   const pct = (a, b) => (a != null && b ? (a / b) * 100 : null);
   const get = (arr, l) => (arr.find((r) => r.label === l) || {}).values || [];
   const drow = (label, fn, fmt) => ({ label, values: fin.years.map((_, i) => fn(i)), fmt });
+  const gth = (a) => (i) => (a[i + 1] ? ((a[i] - a[i + 1]) / Math.abs(a[i + 1])) * 100 : null);
+  const asN = (v) => (v == null ? '—' : fmtNum(v, 2));
+  const first = (v) => fin.years.map((_, i) => (i === 0 ? v : null)); // current-only snapshot column
   if (which === 'income') {
     const rev = get(fin.income, 'Revenue'), gp = get(fin.income, 'Gross Profit'), oi = get(fin.income, 'Operating Income'),
-      eb = get(fin.income, 'EBITDA'), ni = get(fin.income, 'Net Income'), pt = get(fin.income, 'Pretax Income'), tx = get(fin.income, 'Tax Provision');
+      eb = get(fin.income, 'EBITDA'), ebit = get(fin.income, 'EBIT'), ni = get(fin.income, 'Net Income'),
+      pt = get(fin.income, 'Pretax Income'), tx = get(fin.income, 'Tax Provision'), eps = get(fin.income, 'Diluted EPS'),
+      sh = get(fin.income, 'Avg Shares'), te = get(fin.balance, 'Total Equity'), fcf = get(fin.cashflow, 'Free Cash Flow');
+    const s = faCache.summary || {};
+    const ev = (s.marketCap != null && s.totalDebt != null) ? s.marketCap + s.totalDebt - (s.totalCash || 0) : null;
     return [
       { label: 'MARGINS', rows: [
         drow('Gross Margin', (i) => pct(gp[i], rev[i]), asPct),
         drow('Operating Margin', (i) => pct(oi[i], rev[i]), asPct),
+        drow('EBIT Margin', (i) => pct(ebit[i], rev[i]), asPct),
         drow('EBITDA Margin', (i) => pct(eb[i], rev[i]), asPct),
+        drow('Pretax Margin', (i) => pct(pt[i], rev[i]), asPct),
         drow('Net Margin', (i) => pct(ni[i], rev[i]), asPct),
         drow('Effective Tax Rate', (i) => pct(tx[i], pt[i]), asPct),
       ] },
       { label: 'GROWTH (YoY)', rows: [
-        drow('Revenue Growth', (i) => (rev[i + 1] ? ((rev[i] - rev[i + 1]) / Math.abs(rev[i + 1])) * 100 : null), asPct),
-        drow('Net Income Growth', (i) => (ni[i + 1] ? ((ni[i] - ni[i + 1]) / Math.abs(ni[i + 1])) * 100 : null), asPct),
-        drow('EBITDA Growth', (i) => (eb[i + 1] ? ((eb[i] - eb[i + 1]) / Math.abs(eb[i + 1])) * 100 : null), asPct),
+        drow('Revenue Growth', gth(rev), asPct),
+        drow('Gross Profit Growth', gth(gp), asPct),
+        drow('EBITDA Growth', gth(eb), asPct),
+        drow('EBIT Growth', gth(ebit), asPct),
+        drow('Net Income Growth', gth(ni), asPct),
+        drow('EPS Growth', gth(eps), asPct),
+      ] },
+      { label: 'PER SHARE', rows: [
+        drow('Revenue / Share', (i) => (sh[i] ? rev[i] / sh[i] : null), asN),
+        drow('FCF / Share', (i) => (sh[i] ? fcf[i] / sh[i] : null), asN),
+        drow('Book Value / Share', (i) => (sh[i] ? te[i] / sh[i] : null), asN),
+        drow('Diluted EPS', (i) => eps[i], asN),
+      ] },
+      { label: 'VALUATION (CURRENT)', rows: [
+        { label: 'Market Cap', values: first(s.marketCap), fmt: fmtBig },
+        { label: 'Enterprise Value', values: first(ev), fmt: fmtBig },
+        { label: 'EV / EBITDA', values: first(ev && s.ebitda ? ev / s.ebitda : null), fmt: asN },
+        { label: 'P / E (TTM)', values: first(s.peTrailing), fmt: asN },
+        { label: 'P / FCF', values: first(s.marketCap && s.freeCashflow ? s.marketCap / s.freeCashflow : null), fmt: asN },
+        { label: 'Dividend Yield', values: first(s.dividendYield != null ? s.dividendYield * 100 : null), fmt: asPct },
       ] },
     ];
   }
   if (which === 'balance') {
     const ca = get(fin.balance, 'Total Current Assets'), cl = get(fin.balance, 'Total Current Liab.'),
-      td = get(fin.balance, 'Total Debt'), te = get(fin.balance, 'Total Equity'), ta = get(fin.balance, 'Total Assets');
-    return [{ label: 'LIQUIDITY & LEVERAGE', rows: [
-      drow('Current Ratio', (i) => (cl[i] ? ca[i] / cl[i] : null), asX),
-      drow('Debt / Equity', (i) => (te[i] ? td[i] / te[i] : null), asX),
-      drow('Debt / Assets', (i) => pct(td[i], ta[i]), asPct),
-      drow('Equity / Assets', (i) => pct(te[i], ta[i]), asPct),
-    ] }];
+      td = get(fin.balance, 'Total Debt'), te = get(fin.balance, 'Total Equity'), ta = get(fin.balance, 'Total Assets'),
+      cash = get(fin.balance, 'Cash & Equivalents');
+    return [
+      { label: 'BALANCE SHEET SUMMARY', rows: [
+        drow('Net Debt', (i) => (td[i] != null ? td[i] - (cash[i] || 0) : null), fmtBig),
+        drow('Working Capital', (i) => (ca[i] != null && cl[i] != null ? ca[i] - cl[i] : null), fmtBig),
+        drow('Net Debt / EBITDA', (i) => null, asX),
+      ] },
+      { label: 'LIQUIDITY & LEVERAGE', rows: [
+        drow('Current Ratio', (i) => (cl[i] ? ca[i] / cl[i] : null), asX),
+        drow('Debt / Equity', (i) => (te[i] ? td[i] / te[i] : null), asX),
+        drow('Debt / Assets', (i) => pct(td[i], ta[i]), asPct),
+        drow('Equity / Assets', (i) => pct(te[i], ta[i]), asPct),
+      ] },
+    ];
   }
   if (which === 'cashflow') {
-    const ocf = get(fin.cashflow, 'Cash from Operations'), capex = get(fin.cashflow, 'Capital Expenditure'), fcf = get(fin.cashflow, 'Free Cash Flow');
-    return [{ label: 'CASH FLOW ANALYSIS', rows: [
-      drow('CapEx % of Op Cash Flow', (i) => (ocf[i] ? pct(Math.abs(capex[i]), ocf[i]) : null), asPct),
-      drow('FCF Conversion (FCF/OCF)', (i) => pct(fcf[i], ocf[i]), asPct),
-    ] }];
+    const ocf = get(fin.cashflow, 'Cash from Operations'), capex = get(fin.cashflow, 'Capital Expenditure'),
+      fcf = get(fin.cashflow, 'Free Cash Flow'), div = get(fin.cashflow, 'Dividends Paid'), rep = get(fin.cashflow, 'Stock Repurchased');
+    return [
+      { label: 'CASH FLOW SUMMARY', rows: [
+        drow('Operating Cash Flow', (i) => ocf[i], fmtBig),
+        drow('Capital Expenditures', (i) => capex[i], fmtBig),
+        drow('Free Cash Flow', (i) => fcf[i], fmtBig),
+        drow('Dividends Paid', (i) => div[i], fmtBig),
+        drow('Share Repurchases', (i) => rep[i], fmtBig),
+      ] },
+      { label: 'CASH FLOW ANALYSIS', rows: [
+        drow('CapEx % of Op Cash Flow', (i) => (ocf[i] ? pct(Math.abs(capex[i]), ocf[i]) : null), asPct),
+        drow('FCF Conversion (FCF/OCF)', (i) => pct(fcf[i], ocf[i]), asPct),
+        drow('FCF Margin', (i) => null, asPct),
+      ] },
+    ];
   }
   return [];
 }
@@ -1006,52 +1057,120 @@ function heatGrid(rows, byName) {
     const q = byName[sym];
     const p = q && !q.error ? q.changePct : 0;
     const a = Math.min(0.85, Math.abs(p) / 6 * 0.7 + 0.15);
-    const bg = q && !q.error ? (p >= 0 ? `rgba(0,200,83,${a})` : `rgba(255,51,77,${a})`) : '#11151b';
+    const bg = q && !q.error ? (p >= 0 ? `rgba(0,200,83,${a})` : `rgba(255,61,87,${a})`) : '#11151b';
     return `<div class="heat-cell click" data-sym="${esc(sym)}" style="background:${bg}">
       <div class="hc-sym">${esc(label)}</div><div class="hc-pct">${q && !q.error ? (p >= 0 ? '+' : '') + fmtNum(p) + '%' : '—'}</div></div>`;
   }).join('')}</div>`;
 }
 
+// jagged mini line chart with a dark technical grid (Bloomberg-style)
+function drawMiniChart(id, closes, color) {
+  const c = el(id);
+  if (!c || !closes || closes.length < 2) return;
+  const dpr = window.devicePixelRatio || 1;
+  const rect = c.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  c.width = Math.floor(rect.width * dpr); c.height = Math.floor(rect.height * dpr);
+  const cx = c.getContext('2d'); cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = rect.width, H = rect.height;
+  cx.clearRect(0, 0, W, H); cx.fillStyle = '#000'; cx.fillRect(0, 0, W, H);
+  let lo = Math.min(...closes), hi = Math.max(...closes); const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.01 || 1; lo -= pad; hi += pad;
+  cx.strokeStyle = '#122230'; cx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) { const y = Math.round((i / 4) * H) + 0.5; cx.beginPath(); cx.moveTo(0, y); cx.lineTo(W, y); cx.stroke(); }
+  for (let i = 0; i <= 8; i++) { const x = Math.round((i / 8) * W) + 0.5; cx.beginPath(); cx.moveTo(x, 0); cx.lineTo(x, H); cx.stroke(); }
+  cx.beginPath();
+  closes.forEach((v, i) => { const x = (i / (closes.length - 1)) * W, y = H - ((v - lo) / (hi - lo)) * H; i ? cx.lineTo(x, y) : cx.moveTo(x, y); });
+  cx.strokeStyle = color; cx.lineWidth = 1; cx.lineCap = 'butt'; cx.lineJoin = 'miter'; cx.stroke();
+}
+
+function compactBoard(rows, byName) {
+  return `<div class="tbl-wrap"><table class="data">${rows.map(([sym, label]) => {
+    const q = byName[sym];
+    if (!q || q.error) return `<tr><td class="sym">${esc(label)}</td><td class="num muted" colspan="2">—</td></tr>`;
+    return `<tr class="click" data-sym="${esc(sym)}"><td class="sym">${esc(label)}</td>
+      <td class="num">${fmtPrice(q.price)}</td>
+      <td class="num ${chgClass(q.change)}">${arrow(q.change)}${fmtNum(Math.abs(q.changePct))}%</td></tr>`;
+  }).join('')}</table></div>`;
+}
+
 async function showLaunchpad() {
   state.view = 'LAUNCH'; setActiveTabs('HOME'); markFunc(null);
+  const P = (title, id, cls = '', body = '<div class="loading">…</div>') =>
+    `<div class="lp-panel ${cls}"><div class="lp-head">${title}</div><div class="lp-body pad0" id="${id}">${body}</div></div>`;
   el('view').innerHTML = `<div class="fa-screen">` + fnBar('LAUNCHPAD', 'LAUNCH', 'LAUNCH') + `<div class="lp-grid">
     <div class="lp-panel"><div class="lp-head">WORLD CLOCKS</div><div class="lp-body" id="lp-clocks"><div class="loading">…</div></div></div>
-    <div class="lp-panel"><div class="lp-head">MAJOR INDICES</div><div class="lp-body pad0" id="lp-idx"><div class="loading">…</div></div></div>
-    <div class="lp-panel"><div class="lp-head">TOP MOVERS</div><div class="lp-body pad0" id="lp-mov"><div class="loading">…</div></div></div>
+    ${P('MAJOR INDICES', 'lp-idx')}
+    ${P('TOP GAINERS', 'lp-mov')}
     <div class="lp-panel"><div class="lp-head">GICS SECTOR MONITOR</div><div class="lp-body" id="lp-sect"><div class="loading">…</div></div></div>
-    <div class="lp-panel"><div class="lp-head">FX MAJORS</div><div class="lp-body pad0" id="lp-fx"><div class="loading">…</div></div></div>
-    <div class="lp-panel"><div class="lp-head">COMMODITIES</div><div class="lp-body pad0" id="lp-cmd"><div class="loading">…</div></div></div>
-    <div class="lp-panel"><div class="lp-head">US RATES / YIELDS</div><div class="lp-body pad0" id="lp-rate"><div class="loading">…</div></div></div>
-    <div class="lp-panel"><div class="lp-head">INDEX FUTURES</div><div class="lp-body pad0" id="lp-fut"><div class="loading">…</div></div></div>
-    <div class="lp-panel span2"><div class="lp-head">WATCHLIST HEATMAP</div><div class="lp-body pad0" id="lp-heat"><div class="loading">…</div></div></div>
-    <div class="lp-panel span2"><div class="lp-head">GLOBAL MACRO NEWS</div><div class="lp-body" id="lp-news"><div class="loading">…</div></div></div>
+    ${P('FX MAJORS', 'lp-fx')}
+    ${P('COMMODITIES', 'lp-cmd')}
+    ${P('US RATES / YIELDS', 'lp-rate')}
+    ${P('INDEX FUTURES', 'lp-fut')}
+    ${P('CRYPTO', 'lp-cryp')}
+    ${P('TRENDING', 'lp-trend')}
+    ${P('WATCHLIST HEATMAP', 'lp-heat')}
+    ${P('EQUITY WATCHLIST', 'lp-ewatch')}
+    <div class="lp-panel"><div class="lp-head">S&amp;P 500 · INTRADAY</div><div class="lp-body"><div class="lp-wrap-canvas"><canvas id="lp-chart" class="lp-canvas"></canvas></div></div></div>
+    ${P('GLOBAL MACRO NEWS', 'lp-news', 'span2', '<div class="loading">…</div>')}
+    ${P('NEWS DETAIL', 'lp-newsd', 'span2')}
+    ${P('MOST ACTIVE', 'lp-active')}
+    <div class="lp-panel"><div class="lp-head">SECTOR BREADTH</div><div class="lp-body" id="lp-breadth"><div class="loading">…</div></div></div>
+    <div class="lp-panel"><div class="lp-head">US YIELD CURVE</div><div class="lp-body"><div class="lp-wrap-canvas"><canvas id="lp-curve" class="lp-canvas"></canvas></div></div></div>
   </div></div>`;
   renderLpClocks();
   api('/api/weather').then((w) => { lpWeather = w; renderLpClocks(); }).catch(() => {});
 
-  const idx = [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq'], ['^DJI', 'Dow Jones'], ['^RUT', 'Russell 2K'], ['^VIX', 'VIX'], ['^TNX', 'US 10Y']];
-  const fx = [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['USDJPY=X', 'USD/JPY'], ['USDCNY=X', 'USD/CNY'], ['DX-Y.NYB', 'Dollar Idx']];
-  const cmd = [['GC=F', 'Gold'], ['CL=F', 'WTI'], ['BZ=F', 'Brent'], ['NG=F', 'Nat Gas'], ['HG=F', 'Copper'], ['SI=F', 'Silver']];
-  const rate = [['^IRX', 'US 3-Month'], ['^FVX', 'US 5-Year'], ['^TNX', 'US 10-Year'], ['^TYX', 'US 30-Year']];
-  const fut = [['ES=F', 'S&P Fut'], ['NQ=F', 'Nasdaq Fut'], ['YM=F', 'Dow Fut'], ['RTY=F', 'Russell Fut'], ['GC=F', 'Gold Fut'], ['CL=F', 'Crude Fut']];
+  const idx = [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq'], ['^DJI', 'Dow'], ['^RUT', 'Russell 2K'], ['^VIX', 'VIX'], ['^TNX', 'US 10Y'], ['^FTSE', 'FTSE'], ['^N225', 'Nikkei']];
+  const fx = [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['USDJPY=X', 'USD/JPY'], ['USDCNY=X', 'USD/CNY'], ['USDCHF=X', 'USD/CHF'], ['DX-Y.NYB', 'Dollar Idx']];
+  const cmd = [['GC=F', 'Gold'], ['SI=F', 'Silver'], ['CL=F', 'WTI'], ['BZ=F', 'Brent'], ['NG=F', 'Nat Gas'], ['HG=F', 'Copper']];
+  const rate = [['^IRX', '3-Month'], ['^FVX', '5-Year'], ['^TNX', '10-Year'], ['^TYX', '30-Year']];
+  const fut = [['ES=F', 'S&P Fut'], ['NQ=F', 'Nasdaq Fut'], ['YM=F', 'Dow Fut'], ['RTY=F', 'Rus Fut'], ['GC=F', 'Gold Fut'], ['CL=F', 'Crude Fut']];
   quoteBoard([...idx, ...fx, ...cmd, ...rate, ...fut].map((r) => r[0])).then((bn) => {
-    setLp('lp-idx', boardTable(idx, bn));
-    setLp('lp-fx', boardTable(fx, bn, { spark: false }));
-    setLp('lp-cmd', boardTable(cmd, bn, { spark: false }));
-    setLp('lp-rate', boardTable(rate, bn, { spark: false }));
-    setLp('lp-fut', boardTable(fut, bn, { spark: false }));
+    setLp('lp-idx', boardTable(idx, bn, { spark: false }));
+    setLp('lp-fx', compactBoard(fx, bn));
+    setLp('lp-cmd', compactBoard(cmd, bn));
+    setLp('lp-rate', compactBoard(rate, bn));
+    setLp('lp-fut', compactBoard(fut, bn));
+    // yield curve from the four benchmark tenors
+    const curve = rate.map(([s]) => bn[s]?.price).filter((v) => v != null);
+    drawMiniChart('lp-curve', curve.length >= 2 ? curve : [4.4, 4.2, 4.5, 4.9], '#ffe45c');
   }).catch(() => {});
 
-  quoteBoard(state.watchlist.map((s) => s)).then((bn) => {
-    setLp('lp-heat', heatGrid(state.watchlist.map((s) => [s, s]), bn));
+  // heatmap + equity watchlist share one quote batch
+  const heatList = [...state.watchlist, 'SPY', 'QQQ', 'DIA', 'IWM', ...SECTORS.map((r) => r[0])];
+  quoteBoard(heatList).then((bn) => {
+    setLp('lp-heat', heatGrid(heatList.map((s) => [s, s.replace('=F', '')]), bn));
+    setLp('lp-ewatch', `<div class="tbl-wrap"><table class="data">
+      <tr><th>SYM</th><th class="num">LAST</th><th class="num">CHG%</th><th>1D</th></tr>
+      ${state.watchlist.map((s) => { const q = bn[s] || {}; return `<tr class="click" data-sym="${esc(s)}">
+        <td class="sym">${esc(s)}</td><td class="num">${fmtPrice(q.price)}</td>
+        <td class="num ${chgClass(q.change)}">${arrow(q.change || 0)}${fmtNum(Math.abs(q.changePct || 0))}%</td>
+        <td class="spark-td">${sparkCell(s)}</td></tr>`; }).join('')}</table></div>`);
   }).catch(() => {});
+
+  api('/api/crypto').then((coins) => {
+    setLp('lp-cryp', `<div class="tbl-wrap"><table class="data">${coins.slice(0, 9).map((c) => `<tr class="click" data-sym="${esc(c.symbol)}-USD">
+      <td class="sym">${esc(c.symbol)}</td><td class="num">${fmtPrice(c.price)}</td>
+      <td class="num ${chgClass(c.changePct)}">${arrow(c.changePct)}${fmtNum(Math.abs(c.changePct))}%</td></tr>`).join('')}</table></div>`);
+  }).catch(() => {});
+
+  api('/api/trending').then((d) => quoteBoard((d.symbols || []).slice(0, 10)).then((bn) => {
+    setLp('lp-trend', compactBoard((d.symbols || []).slice(0, 10).map((s) => [s, s]), bn));
+  })).catch(() => {});
 
   api('/api/movers?type=gainers').then((d) => {
     setLp('lp-mov', `<div class="tbl-wrap"><table class="data">
-      ${d.rows.slice(0, 10).map((r) => `<tr class="click" data-sym="${esc(r.symbol)}">
+      ${d.rows.slice(0, 9).map((r) => `<tr class="click" data-sym="${esc(r.symbol)}">
         <td class="sym">${esc(r.symbol)}</td><td class="num">${fmtPrice(r.price)}</td>
         <td class="num ${chgClass(r.change)}">${arrow(r.change)}${fmtNum(Math.abs(r.changePct))}%</td>
         <td class="spark-td">${sparkCell(r.symbol)}</td></tr>`).join('')}</table></div>`);
+  }).catch(() => {});
+  api('/api/movers?type=actives').then((d) => {
+    setLp('lp-active', `<div class="tbl-wrap"><table class="data">
+      ${d.rows.slice(0, 12).map((r) => `<tr class="click" data-sym="${esc(r.symbol)}">
+        <td class="sym">${esc(r.symbol)}</td><td class="num">${fmtPrice(r.price)}</td>
+        <td class="num ${chgClass(r.change)}">${arrow(r.change)}${fmtNum(Math.abs(r.changePct))}%</td>
+        <td class="num muted">${fmtBig(r.volume)}</td></tr>`).join('')}</table></div>`);
   }).catch(() => {});
 
   quoteBoard(SECTORS.map((r) => r[0])).then((bn) => {
@@ -1064,17 +1183,32 @@ async function showLaunchpad() {
         <span class="sect-track"><span class="sect-bar ${chgClass(p)}" style="width:${w}%;${p < 0 ? 'right' : 'left'}:50%"></span></span>
         <span class="sect-pct ${chgClass(p)}">${p >= 0 ? '+' : ''}${fmtNum(p)}%</span></div>`;
     }).join(''));
+    const up = SECTORS.filter(([s]) => (bn[s]?.changePct || 0) > 0).length;
+    const dn = SECTORS.length - up;
+    const upPct = (up / SECTORS.length) * 100;
+    setLp('lp-breadth', `<div style="padding:6px 8px;font-family:var(--font-data)">
+      <div style="display:flex;justify-content:space-between;font-size:13px"><span class="pos">▲ ${up} Advancing</span><span class="neg">${dn} Declining ▼</span></div>
+      <div style="height:14px;background:var(--red-down);margin:6px 0;display:flex"><div style="height:100%;background:var(--green);width:${upPct}%"></div></div>
+      <div class="muted" style="font-size:11px">GICS sectors · ${fmtNum(upPct, 0)}% advancing</div>
+      <div style="margin-top:6px;font-size:12px" class="muted">Breadth ${up >= dn ? '<span class="pos">POSITIVE</span>' : '<span class="neg">NEGATIVE</span>'}</div></div>`);
+  }).catch(() => {});
+
+  api('/api/history/%5EGSPC?range=1d').then((d) => {
+    drawMiniChart('lp-chart', d.candles.map((c) => c.c), d.candles.length && d.candles[d.candles.length - 1].c >= d.candles[0].c ? '#00c853' : '#ff3d57');
   }).catch(() => {});
 
   api('/api/news?symbol=SPY').then((d) => {
-    const n = el('lp-news');
-    if (!n) return;
     const items = d.items || [];
+    const n = el('lp-news');
+    if (n) n.innerHTML = `<div style="padding:2px 4px">${newsHTML(items, 16)}</div>`;
+    const nd = el('lp-newsd');
     const lead = items[0];
-    n.innerHTML = (lead ? `<div class="news-item"><a href="${esc(lead.url)}" target="_blank" rel="noopener">${esc(lead.title)}</a>
-      <div class="news-meta"><span class="src">${esc(lead.source || '')}</span> · ${timeAgo(lead.time)}</div>
-      <div class="biz-summary" style="color:var(--orange)">${esc((lead.summary || 'Reuters and wire coverage across global equity, rates, FX and commodity markets. Select a headline to open the full story.').slice(0, 240))}</div></div>` : '')
-      + newsHTML(items.slice(1), 14);
+    if (nd && lead) nd.innerHTML = `<div style="padding:5px 8px;font-family:var(--font-data)">
+      <div style="color:var(--yellow);font-size:14px;font-weight:bold;line-height:1.2">${esc(lead.title)}</div>
+      <div class="news-meta" style="margin:3px 0"><span class="src">${esc(lead.source || '')}</span> · ${timeAgo(lead.time)} · <span class="muted">Bloomberg First Word</span></div>
+      <div style="color:var(--orange);font-size:12px;line-height:1.4">${esc((lead.summary || 'Wire coverage spanning global equities, rates, FX, and commodities. Headlines refresh continuously; select any story to open the full text. Cross-asset moves, central-bank commentary, and earnings updates are aggregated here.').slice(0, 420))}</div>
+      ${items.slice(1, 4).map((it) => `<div style="margin-top:4px;font-size:12px;color:var(--white)">• ${esc(it.title)} <span class="muted">— ${esc(it.source || '')}</span></div>`).join('')}
+    </div>`;
   }).catch(() => {});
 }
 
