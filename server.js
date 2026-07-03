@@ -521,12 +521,20 @@ const INCOME_ROWS = [
   ['annualDilutedEPS', 'Diluted EPS'], ['annualBasicAverageShares', 'Avg Shares'],
 ];
 const BALANCE_ROWS = [
-  ['annualCashAndCashEquivalents', 'Cash & Equivalents'], ['annualCashCashEquivalentsAndShortTermInvestments', 'Cash & ST Invest.'],
-  ['annualReceivables', 'Receivables'], ['annualInventory', 'Inventory'], ['annualCurrentAssets', 'Total Current Assets'],
-  ['annualNetPPE', 'Net PP&E'], ['annualGoodwill', 'Goodwill'], ['annualTotalAssets', 'Total Assets'],
-  ['annualCurrentLiabilities', 'Total Current Liab.'], ['annualLongTermDebt', 'Long-Term Debt'], ['annualTotalDebt', 'Total Debt'],
-  ['annualTotalLiabilitiesNetMinorityInterest', 'Total Liabilities'], ['annualRetainedEarnings', 'Retained Earnings'],
-  ['annualStockholdersEquity', 'Total Equity'],
+  ['annualCashAndCashEquivalents', 'Cash & Equivalents'], ['annualOtherShortTermInvestments', 'Short-Term Investments'],
+  ['annualAccountsReceivable', 'Accounts Receivable'], ['annualOtherReceivables', 'Other Receivables'],
+  ['annualInventory', 'Inventory'], ['annualOtherCurrentAssets', 'Other Current Assets'],
+  ['annualCurrentAssets', 'Total Current Assets'],
+  ['annualGrossPPE', 'Gross PP&E'], ['annualAccumulatedDepreciation', 'Accumulated Depreciation'], ['annualNetPPE', 'Net PP&E'],
+  ['annualGoodwill', 'Goodwill'], ['annualOtherIntangibleAssets', 'Intangibles'], ['annualOtherNonCurrentAssets', 'Other Non-Current Assets'],
+  ['annualTotalAssets', 'Total Assets'],
+  ['annualAccountsPayable', 'Accounts Payable'], ['annualCurrentAccruedExpenses', 'Accrued Expenses'],
+  ['annualCurrentDeferredRevenue', 'Deferred Revenue'], ['annualCurrentDebt', 'Short-Term Debt'],
+  ['annualCurrentLiabilities', 'Total Current Liab.'],
+  ['annualLongTermDebt', 'Long-Term Debt'], ['annualOtherNonCurrentLiabilities', 'Other Non-Current Liab.'],
+  ['annualTotalLiabilitiesNetMinorityInterest', 'Total Liabilities'], ['annualTotalDebt', 'Total Debt'],
+  ['annualCommonStock', 'Common Stock'], ['annualRetainedEarnings', 'Retained Earnings'], ['annualTreasuryStock', 'Treasury Stock'],
+  ['annualMinorityInterest', 'Minority Interest'], ['annualStockholdersEquity', 'Total Equity'],
 ];
 const CASHFLOW_ROWS = [
   ['annualOperatingCashFlow', 'Cash from Operations'], ['annualCapitalExpenditure', 'Capital Expenditure'],

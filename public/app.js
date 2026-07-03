@@ -106,6 +106,7 @@ const state = {
   view: 'home',      // active top-level view
   range: '6mo',
   chartType: 'candle',
+  showMA: true,
   candles: [],
   watchlist: JSON.parse(localStorage.getItem('openterm.watchlist') || 'null')
     || ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA', 'SPY'],
@@ -291,49 +292,124 @@ function runFunc(code) {
 const RANGE_LABELS = [['1d', '1D'], ['5d', '5D'], ['1mo', '1M'], ['3mo', '3M'],
   ['6mo', '6M'], ['1y', '1Y'], ['5y', '5Y'], ['max', 'MAX']];
 
-let chartEl, ctx, hoverIdx = -1;
+let chartEl, ctx, volEl, vctx, hoverIdx = -1;
+
+function movingAvg(candles, period) {
+  const out = new Array(candles.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < candles.length; i++) {
+    sum += candles[i].c;
+    if (i >= period) sum -= candles[i - period].c;
+    if (i >= period - 1) out[i] = sum / period;
+  }
+  return out;
+}
 
 async function showChart(range) {
   if (!state.symbol) { msg('Load a security first — e.g. AAPL GP', true); return; }
   if (range) state.range = range;
-  setActiveTabs(null);
-  el('view').innerHTML = `
-    <div id="screen-chart">
-      ${fnBar(state.range === '1d' ? 'INTRADAY PRICE GRAPH' : 'PRICE GRAPH', state.range === '1d' ? 'GIP' : 'GP', eqBox())}
-      <div id="chart-toolbar">
-        <span class="tb-label">RANGE</span>
-        ${RANGE_LABELS.map(([r, l]) => `<button class="tb-btn rbtn" data-range="${r}">${l}</button>`).join('')}
-        <span class="tb-label">TYPE</span>
-        <button class="tb-btn tbtn" data-type="candle">CANDLE</button>
-        <button class="tb-btn tbtn" data-type="line">LINE</button>
+  setActiveTabs(null); markFunc(state.range === '1d' ? 'GIP' : 'GP');
+  const controls = `<span class="fn-ctrl">Mov Avg ▾</span><span class="fn-ctrl">Study ▾</span><span class="fn-ctrl">Events ▾</span><span class="fn-ctrl"><b>Cur</b> USD ▾</span>`;
+  el('view').innerHTML = `<div class="fa-screen">
+    ${fnBar(state.range === '1d' ? 'INTRADAY GRAPH' : 'PRICE GRAPH', state.range === '1d' ? 'GIP' : 'GP', eqBox(), controls)}
+    <div id="gp-metabar"><span class="muted">Loading…</span></div>
+    <div id="chart-toolbar">
+      <span class="tb-label">RANGE</span>
+      ${RANGE_LABELS.map(([r, l]) => `<button class="tb-btn rbtn" data-range="${r}">${l}</button>`).join('')}
+      <span class="tb-label">TYPE</span>
+      <button class="tb-btn tbtn" data-type="candle">CANDLE</button>
+      <button class="tb-btn tbtn" data-type="line">LINE</button>
+      <span class="tb-sep"></span>
+      <button class="tb-btn mav-btn">MAV</button>
+      <button class="tb-btn dis">COMPARE</button><button class="tb-btn dis">EVENTS</button><button class="tb-btn dis">NEWS</button>
+    </div>
+    <div id="gp-main">
+      <div id="gp-chartcol">
+        <div id="chart-wrap"><canvas id="chart"></canvas></div>
+        <div id="chart-sub"><canvas id="chart-vol"></canvas></div>
+        <div id="chart-legend"></div>
       </div>
-      <div id="chart-wrap"><canvas id="chart"></canvas></div>
-      <div id="chart-legend"></div>
-    </div>`;
-  chartEl = el('chart');
-  ctx = chartEl.getContext('2d');
+      <div id="gp-side"><div class="loading">…</div></div>
+    </div>
+    <div id="gp-events"><span class="muted">Loading events…</span></div>
+  </div>`;
+  chartEl = el('chart'); ctx = chartEl.getContext('2d');
+  volEl = el('chart-vol'); vctx = volEl.getContext('2d');
   el('view').querySelectorAll('.rbtn').forEach((b) => {
     b.classList.toggle('active', b.dataset.range === state.range);
-    b.addEventListener('click', () => { state.range = b.dataset.range; markFunc(b.dataset.range === '1d' ? 'GIP' : 'GP'); showChart(); });
+    b.addEventListener('click', () => { state.range = b.dataset.range; showChart(); });
   });
   el('view').querySelectorAll('.tbtn').forEach((b) => {
     b.classList.toggle('active', b.dataset.type === state.chartType);
     b.addEventListener('click', () => { state.chartType = b.dataset.type; el('view').querySelectorAll('.tbtn').forEach((x) => x.classList.toggle('active', x === b)); drawChart(); });
   });
+  const mav = el('view').querySelector('.mav-btn');
+  mav.classList.toggle('active', state.showMA);
+  mav.addEventListener('click', () => { state.showMA = !state.showMA; mav.classList.toggle('active', state.showMA); drawChart(); });
   attachChartEvents();
   try {
     const data = await api(`/api/history/${encodeURIComponent(state.symbol)}?range=${state.range}`);
     state.candles = data.candles;
     hoverIdx = -1;
+    renderGPmeta(data.meta);
+    renderGPside(data.meta);
     resizeChart();
   } catch (err) { msg(`chart: ${err.message}`, true); el('chart-legend').innerHTML = `<span class="neg">${esc(err.message)}</span>`; }
+  api(`/api/news?symbol=${encodeURIComponent(state.symbol)}`).then((d) => {
+    const e = el('gp-events'); if (!e) return;
+    e.innerHTML = (d.items || []).slice(0, 6).map((n) =>
+      `<span class="gp-ev"><span class="src">${esc((n.source || '').slice(0, 14))}</span> ${esc(n.title.slice(0, 70))}</span>`).join('<span class="gp-evsep">•</span>');
+  }).catch(() => {});
+}
+
+function renderGPmeta(meta) {
+  const c = state.candles; if (!c.length) return;
+  const last = c[c.length - 1], first = c[0];
+  const chg = last.c - first.c, pct = first.c ? (chg / first.c) * 100 : 0;
+  const hi = Math.max(...c.map((x) => x.h)), lo = Math.min(...c.map((x) => x.l));
+  const vol = c.reduce((a, x) => a + (x.v || 0), 0);
+  const q = state.quote || {};
+  const cell = (k, v, cls = '') => `<span class="gpm"><span class="gpm-k">${k}</span> <span class="gpm-v ${cls}">${v}</span></span>`;
+  el('gp-metabar').innerHTML =
+    cell('Rng', state.range.toUpperCase()) + cell('Cur', meta.currency || 'USD')
+    + cell('Last', fmtPrice(last.c), chgClass(q.change))
+    + cell('Chg', fmtChange(chg, pct), chgClass(chg))
+    + cell('Open', fmtPrice(first.o)) + cell('High', fmtPrice(hi), 'pos') + cell('Low', fmtPrice(lo), 'neg')
+    + cell('Vol', fmtBig(vol)) + cell('52W H', fmtPrice(q.high52w)) + cell('52W L', fmtPrice(q.low52w));
+}
+
+function renderGPside(meta) {
+  const c = state.candles; if (!c.length) return;
+  const last = c[c.length - 1], q = state.quote || {};
+  const ma20 = movingAvg(c, 20), ma50 = movingAvg(c, 50);
+  const hi = Math.max(...c.map((x) => x.h)), lo = Math.min(...c.map((x) => x.l));
+  const row = (k, v, cls = '') => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${cls}">${v}</span></div>`;
+  el('gp-side').innerHTML =
+    `<div class="sec-bar" style="position:static">QUOTE RECAP</div><div class="kv-grid" style="grid-template-columns:1fr">
+      ${row('Last', fmtPrice(last.c), chgClass(q.change))}
+      ${row('Change', fmtChange(q.change, q.changePct), chgClass(q.change))}
+      ${row('Open', fmtPrice(q.open))}
+      ${row('Prev Close', fmtPrice(q.prevClose))}
+      ${row('Day High', fmtPrice(q.dayHigh), 'pos')}
+      ${row('Day Low', fmtPrice(q.dayLow), 'neg')}
+      ${row('Volume', fmtBig(q.volume))}
+    </div>
+    <div class="sec-bar" style="position:static;margin-top:2px">RANGE / STUDIES</div><div class="kv-grid" style="grid-template-columns:1fr">
+      ${row(`${state.range.toUpperCase()} High`, fmtPrice(hi), 'pos')}
+      ${row(`${state.range.toUpperCase()} Low`, fmtPrice(lo), 'neg')}
+      ${row('52W High', fmtPrice(q.high52w))}
+      ${row('52W Low', fmtPrice(q.low52w))}
+      ${row('MA (20)', fmtPrice(ma20[ma20.length - 1]), 'hl')}
+      ${row('MA (50)', fmtPrice(ma50[ma50.length - 1]), 'blue')}
+      ${row('Exchange', esc(meta.exchange || q.exchange || '—'))}
+    </div>`;
 }
 
 function attachChartEvents() {
   const move = (clientX) => {
     if (!state.candles.length) return;
     const rect = chartEl.getBoundingClientRect();
-    const M = { left: 8, right: 62 };
+    const M = { left: 6, right: 58 };
     const plotW = rect.width - M.left - M.right;
     const i = Math.round(((clientX - rect.left - M.left) / plotW) * state.candles.length - 0.5);
     hoverIdx = Math.max(0, Math.min(state.candles.length - 1, i));
@@ -353,6 +429,12 @@ function resizeChart() {
   chartEl.width = Math.floor(wrap.clientWidth * dpr);
   chartEl.height = Math.floor(wrap.clientHeight * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (volEl) {
+    const sub = el('chart-sub');
+    volEl.width = Math.floor(sub.clientWidth * dpr);
+    volEl.height = Math.floor(sub.clientHeight * dpr);
+    vctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
   drawChart();
 }
 
@@ -369,130 +451,224 @@ function drawChart() {
   const W = chartEl.width / dpr, H = chartEl.height / dpr;
   if (!W || !H) return;
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#050505';
+  ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
   if (!candles.length) return;
 
-  const M = { top: 12, right: 62, bottom: 22, left: 8 };
-  const volH = Math.max(28, Math.floor((H - M.top - M.bottom) * 0.16));
-  const priceH = H - M.top - M.bottom - volH - 6;
+  const M = { top: 10, right: 58, bottom: 18, left: 6 };
+  const priceH = H - M.top - M.bottom;
   const plotW = W - M.left - M.right;
   const n = candles.length;
+  const ma20 = movingAvg(candles, 20), ma50 = movingAvg(candles, 50);
 
-  let lo = Infinity, hi = -Infinity, maxV = 0;
-  for (const c of candles) { if (c.l < lo) lo = c.l; if (c.h > hi) hi = c.h; if (c.v > maxV) maxV = c.v; }
-  const pad = (hi - lo) * 0.06 || hi * 0.01 || 1;
+  let lo = Infinity, hi = -Infinity;
+  for (const c of candles) { if (c.l < lo) lo = c.l; if (c.h > hi) hi = c.h; }
+  if (state.showMA) { for (const v of ma20.concat(ma50)) { if (v != null) { if (v < lo) lo = v; if (v > hi) hi = v; } } }
+  const pad = (hi - lo) * 0.05 || hi * 0.01 || 1;
   lo -= pad; hi += pad;
   const xAt = (i) => M.left + ((i + 0.5) / n) * plotW;
   const yAt = (p) => M.top + (1 - (p - lo) / (hi - lo)) * priceH;
-  const volTop = M.top + priceH + 6;
 
-  ctx.font = '10px monospace';
+  ctx.font = '9px "Arial Narrow", monospace';
   ctx.textBaseline = 'middle';
-  for (let g = 0; g <= 6; g++) {
-    const p = lo + ((hi - lo) * g) / 6, y = yAt(p);
-    ctx.strokeStyle = '#171717';
-    ctx.beginPath(); ctx.moveTo(M.left, y); ctx.lineTo(W - M.right, y); ctx.stroke();
-    ctx.fillStyle = '#8f8f8f'; ctx.textAlign = 'left';
-    ctx.fillText(fmtPrice(p), W - M.right + 5, y);
+  // dense horizontal grid + right axis
+  for (let g = 0; g <= 8; g++) {
+    const p = lo + ((hi - lo) * g) / 8, y = yAt(p);
+    ctx.strokeStyle = '#12202c';
+    ctx.beginPath(); ctx.moveTo(M.left, Math.round(y) + 0.5); ctx.lineTo(W - M.right, Math.round(y) + 0.5); ctx.stroke();
+    ctx.fillStyle = '#8794a3'; ctx.textAlign = 'left';
+    ctx.fillText(fmtPrice(p), W - M.right + 4, y);
   }
   const intraday = ['1d', '5d'].includes(state.range);
-  const ticks = Math.max(2, Math.floor(plotW / 100));
-  ctx.fillStyle = '#8f8f8f'; ctx.textAlign = 'center';
+  const ticks = Math.max(3, Math.floor(plotW / 90));
+  ctx.textAlign = 'center';
   for (let g = 0; g <= ticks; g++) {
     const i = Math.min(n - 1, Math.round((g / ticks) * (n - 1)));
-    ctx.fillText(xLabel(candles[i].t, intraday), xAt(i), H - M.bottom / 2);
+    const x = xAt(i);
+    ctx.strokeStyle = '#0e1a24';
+    ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, M.top); ctx.lineTo(Math.round(x) + 0.5, M.top + priceH); ctx.stroke();
+    ctx.fillStyle = '#8794a3';
+    ctx.fillText(xLabel(candles[i].t, intraday), x, H - M.bottom / 2);
   }
-  const bw = Math.max(1, (plotW / n) * 0.7);
-  for (let i = 0; i < n; i++) {
-    const c = candles[i], h = maxV ? (c.v / maxV) * volH : 0;
-    ctx.fillStyle = c.c >= c.o ? 'rgba(0,200,83,0.32)' : 'rgba(255,61,87,0.32)';
-    ctx.fillRect(xAt(i) - bw / 2, volTop + volH - h, bw, h);
-  }
-  if (state.chartType === 'line' || n > 240) {
+  // price series — thin dense candles
+  const bw = Math.max(1, Math.min(6, (plotW / n) * 0.6));
+  if (state.chartType === 'line' || n > 320) {
     ctx.beginPath();
     for (let i = 0; i < n; i++) { const x = xAt(i), y = yAt(candles[i].c); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
-    ctx.strokeStyle = '#f6a313'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.lineTo(xAt(n - 1), M.top + priceH); ctx.lineTo(xAt(0), M.top + priceH); ctx.closePath();
-    const g = ctx.createLinearGradient(0, M.top, 0, M.top + priceH);
-    g.addColorStop(0, 'rgba(246,163,19,0.18)'); g.addColorStop(1, 'rgba(246,163,19,0)');
-    ctx.fillStyle = g; ctx.fill(); ctx.lineWidth = 1;
+    ctx.strokeStyle = '#f6a313'; ctx.lineWidth = 1; ctx.lineCap = 'butt'; ctx.stroke();
   } else {
     for (let i = 0; i < n; i++) {
-      const c = candles[i], x = xAt(i), up = c.c >= c.o;
+      const c = candles[i], x = Math.round(xAt(i)) + 0.5, up = c.c >= c.o;
       ctx.strokeStyle = ctx.fillStyle = up ? '#00c853' : '#ff3d57';
+      ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(x, yAt(c.h)); ctx.lineTo(x, yAt(c.l)); ctx.stroke();
       const top = yAt(Math.max(c.o, c.c)), bh = Math.max(1, Math.abs(yAt(c.o) - yAt(c.c)));
-      ctx.fillRect(x - bw / 2, top, bw, bh);
+      ctx.fillRect(Math.round(xAt(i) - bw / 2), top, bw, bh);
     }
+  }
+  // moving averages
+  if (state.showMA) {
+    const drawMA = (arr, color) => {
+      ctx.beginPath(); let started = false;
+      for (let i = 0; i < n; i++) { if (arr[i] == null) continue; const x = xAt(i), y = yAt(arr[i]); started ? ctx.lineTo(x, y) : ctx.moveTo(x, y); started = true; }
+      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.stroke();
+    };
+    drawMA(ma20, '#ffe45c'); drawMA(ma50, '#4ec8ff');
   }
   if (state.quote?.prevClose > lo && state.quote?.prevClose < hi) {
     const y = yAt(state.quote.prevClose);
-    ctx.strokeStyle = '#4d4d4d'; ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = '#3a4a58'; ctx.setLineDash([3, 3]);
     ctx.beginPath(); ctx.moveTo(M.left, y); ctx.lineTo(W - M.right, y); ctx.stroke(); ctx.setLineDash([]);
   }
   if (hoverIdx >= 0 && hoverIdx < n) {
     const c = candles[hoverIdx], x = xAt(hoverIdx), y = yAt(c.c);
-    ctx.strokeStyle = 'rgba(246,163,19,0.6)'; ctx.setLineDash([3, 3]);
-    ctx.beginPath(); ctx.moveTo(x, M.top); ctx.lineTo(x, volTop + volH); ctx.stroke();
+    ctx.strokeStyle = 'rgba(78,200,255,0.5)'; ctx.setLineDash([2, 2]);
+    ctx.beginPath(); ctx.moveTo(x, M.top); ctx.lineTo(x, M.top + priceH); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(M.left, y); ctx.lineTo(W - M.right, y); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = '#f6a313'; ctx.textAlign = 'left'; ctx.fillText(fmtPrice(c.c), W - M.right + 5, y);
+    ctx.fillStyle = '#4ec8ff'; ctx.textAlign = 'left'; ctx.fillText(fmtPrice(c.c), W - M.right + 4, y);
     el('chart-legend').innerHTML =
-      `${esc(xLabel(c.t, intraday))}  O:<span class="flat">${fmtPrice(c.o)}</span> H:<span class="pos">${fmtPrice(c.h)}</span> L:<span class="neg">${fmtPrice(c.l)}</span> C:<span class="${chgClass(c.c - c.o)}">${fmtPrice(c.c)}</span> VOL:${fmtBig(c.v)}`;
+      `${esc(xLabel(c.t, intraday))}  O:<span class="flat">${fmtPrice(c.o)}</span> H:<span class="pos">${fmtPrice(c.h)}</span> L:<span class="neg">${fmtPrice(c.l)}</span> C:<span class="${chgClass(c.c - c.o)}">${fmtPrice(c.c)}</span> VOL:${fmtBig(c.v)}` +
+      ` &nbsp; <span class="hl">MA20 ${fmtPrice(ma20[hoverIdx])}</span> <span class="blue">MA50 ${fmtPrice(ma50[hoverIdx])}</span>`;
   } else {
     const f = candles[0], l = candles[n - 1], chg = l.c - f.c, pct = f.c ? (chg / f.c) * 100 : 0;
     el('chart-legend').innerHTML =
-      `${esc(state.symbol)} ${esc(state.range.toUpperCase())} · chg <span class="${chgClass(chg)}">${fmtChange(chg, pct)}</span> · HI ${fmtPrice(Math.max(...candles.map((c) => c.h)))} · LO ${fmtPrice(Math.min(...candles.map((c) => c.l)))} · hover for OHLC`;
+      `${esc(state.symbol)} ${esc(state.range.toUpperCase())} · chg <span class="${chgClass(chg)}">${fmtChange(chg, pct)}</span> · <span class="hl">━ MA20</span> <span class="blue">━ MA50</span> · hover for OHLC`;
+  }
+  drawVolume();
+}
+
+function drawVolume() {
+  if (!vctx || !volEl) return;
+  const candles = state.candles;
+  const dpr = window.devicePixelRatio || 1;
+  const W = volEl.width / dpr, H = volEl.height / dpr;
+  if (!W || !H) return;
+  vctx.clearRect(0, 0, W, H);
+  vctx.fillStyle = '#000'; vctx.fillRect(0, 0, W, H);
+  if (!candles.length) return;
+  const M = { right: 58, left: 6 };
+  const plotW = W - M.right - M.left;
+  const n = candles.length;
+  let maxV = 0; for (const c of candles) if (c.v > maxV) maxV = c.v;
+  vctx.strokeStyle = '#12202c';
+  vctx.beginPath(); vctx.moveTo(M.left, 0.5); vctx.lineTo(W - M.right, 0.5); vctx.stroke();
+  vctx.font = '9px "Arial Narrow", monospace'; vctx.textBaseline = 'top'; vctx.textAlign = 'left';
+  vctx.fillStyle = '#8794a3'; vctx.fillText('Vol ' + fmtBig(maxV), W - M.right + 4, 2);
+  const bw = Math.max(1, Math.min(6, (plotW / n) * 0.6));
+  for (let i = 0; i < n; i++) {
+    const c = candles[i], h = maxV ? (c.v / maxV) * (H - 2) : 0;
+    vctx.fillStyle = c.c >= c.o ? 'rgba(0,200,83,0.5)' : 'rgba(255,61,87,0.5)';
+    vctx.fillRect(Math.round(M.left + ((i + 0.5) / n) * plotW - bw / 2), H - h, bw, h);
+  }
+  if (hoverIdx >= 0 && hoverIdx < n) {
+    const x = M.left + ((hoverIdx + 0.5) / n) * plotW;
+    vctx.strokeStyle = 'rgba(78,200,255,0.5)'; vctx.setLineDash([2, 2]);
+    vctx.beginPath(); vctx.moveTo(x, 0); vctx.lineTo(x, H); vctx.stroke(); vctx.setLineDash([]);
   }
 }
 
 /* ---------------------------------------------------------------- DES */
 
+function desPanel(title, rows, cls = '') {
+  return `<div class="des-panel ${cls}"><div class="sec-bar" style="position:static">${esc(title)}</div>
+    <div class="kv-grid" style="grid-template-columns:1fr">${rows.filter(Boolean).join('')}</div></div>`;
+}
+
 async function showDES() {
   if (!state.symbol) { msg('Load a security first', true); return; }
-  setActiveTabs(null);
-  el('view').innerHTML = fnBar('SECURITY DESCRIPTION', 'DES', eqBox()) +
-    `<div class="sec-body"><div class="loading">Loading…</div></div>`;
-  const body = el('view').querySelector('.sec-body');
+  setActiveTabs(null); markFunc('DES');
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('SECURITY DESCRIPTION', 'DES', eqBox()) +
+    `<div class="des-wrap"><div class="loading">Loading…</div></div></div>`;
+  const wrap = el('view').querySelector('.des-wrap');
   try {
-    const [q, p, s] = await Promise.all([
+    const [q, p, s, news, hist] = await Promise.all([
       api(`/api/quote/${encodeURIComponent(state.symbol)}`),
       api(`/api/profile/${encodeURIComponent(state.symbol)}`).catch(() => ({})),
-      api(`/api/summary/${encodeURIComponent(state.symbol)}`).catch(() => null),
+      api(`/api/summary/${encodeURIComponent(state.symbol)}`).catch(() => ({})),
+      api(`/api/news?symbol=${encodeURIComponent(state.symbol)}`).catch(() => ({ items: [] })),
+      api(`/api/history/${encodeURIComponent(state.symbol)}?range=1y`).catch(() => ({ candles: [] })),
     ]);
-    const kv = (k, v, hl) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${hl ? 'hl' : ''}">${v}</span></div>`;
+    const kv = (k, v, hl) => (v == null || v === '' ? '' : `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${hl ? 'hl' : ''}">${v}</span></div>`);
+    const pctv = (x) => (x == null ? null : `<span class="${chgClass(x)}">${fmtPct(x)}</span>`);
     const off52 = q.high52w ? ((q.price - q.high52w) / q.high52w) * 100 : null;
-    body.innerHTML = `
-      ${s && s.summary ? `<div class="biz-summary">${esc(s.summary.slice(0, 520))}${s.summary.length > 520 ? '…' : ''}</div>` : ''}
-      <div class="sec-bar" style="position:static;margin:4px 0">IDENTIFICATION</div>
-      <div class="kv-grid">
-        ${kv('Name', esc(s?.name || p.name || q.name))}
-        ${kv('Ticker', esc(q.symbol), true)}
-        ${kv('Type', esc(q.type || '—'))}
-        ${kv('Exchange', esc(p.exchange || q.exchange || '—'))}
-        ${kv('Sector', esc(s?.sector || p.sector || '—'))}
-        ${kv('Industry', esc(s?.industry || p.industry || '—'))}
-        ${kv('Country', esc(s?.country || p.country || '—'))}
-        ${kv('Currency', esc(q.currency || '—'))}
-        ${s?.employees ? kv('Employees', fmtBig(s.employees)) : ''}
-        ${s?.website ? kv('Website', `<a class="blue" href="${esc(s.website)}" target="_blank" rel="noopener">${esc(s.website.replace(/^https?:\/\//, ''))}</a>`) : ''}
-      </div>
-      <div class="sec-bar" style="position:static;margin:8px 0 4px">MARKET DATA</div>
-      <div class="kv-grid">
-        ${kv('Last', fmtPrice(q.price), true)}
-        ${kv('Change', `<span class="${chgClass(q.change)}">${fmtChange(q.change, q.changePct)}</span>`)}
-        ${kv('Prev Close', fmtPrice(q.prevClose))}
-        ${kv('Open', fmtPrice(q.open))}
-        ${kv('Day Range', `${fmtPrice(q.dayLow)} – ${fmtPrice(q.dayHigh)}`)}
-        ${kv('52W Range', `${fmtPrice(q.low52w)} – ${fmtPrice(q.high52w)}`)}
-        ${off52 != null ? kv('% Off 52W Hi', `<span class="${chgClass(off52)}">${fmtPct(off52)}</span>`) : ''}
-        ${kv('Volume', fmtBig(q.volume))}
-        ${s?.avgVolume ? kv('Avg Volume', fmtBig(s.avgVolume)) : ''}
-        ${kv('Market Cap', fmtBig(s?.marketCap ?? p.marketCap), true)}
-        ${s?.sharesOut ? kv('Shares Out', fmtBig(s.sharesOut)) : (p.sharesOut ? kv('Shares Out', fmtBig(p.sharesOut)) : '')}
-        ${s?.beta != null ? kv('Beta', fmtRatio(s.beta)) : ''}
+    // price performance from 1y daily candles
+    const c = hist.candles || [];
+    const last = c.length ? c[c.length - 1].c : q.price;
+    const back = (nb) => (c.length > nb ? ((last - c[c.length - 1 - nb].c) / c[c.length - 1 - nb].c) * 100 : null);
+    const ytd = (() => {
+      if (!c.length) return null;
+      const yr = new Date(c[c.length - 1].t * 1000).getFullYear();
+      const first = c.find((x) => new Date(x.t * 1000).getFullYear() === yr);
+      return first ? ((last - first.c) / first.c) * 100 : null;
+    })();
+    const ev = (s.marketCap != null && s.totalDebt != null) ? s.marketCap + s.totalDebt - (s.totalCash || 0) : null;
+    wrap.innerHTML = `
+      ${s.summary ? `<div class="des-desc">${esc(s.summary)}</div>` : ''}
+      <div class="des-grid">
+        ${desPanel('IDENTIFICATION', [
+          kv('Name', esc(s.name || p.name || q.name)), kv('Ticker', esc(q.symbol), true),
+          kv('Type', esc(q.type || 'Equity')), kv('Exchange', esc(p.exchange || q.exchange)),
+          kv('Currency', esc(q.currency)), kv('Country', esc(s.country || '—')),
+          kv('Employees', s.employees ? fmtBig(s.employees) : null),
+          kv('Website', s.website ? `<a class="blue" href="${esc(s.website)}" target="_blank" rel="noopener">${esc(s.website.replace(/^https?:\/\//, ''))}</a>` : null),
+        ])}
+        ${desPanel('CLASSIFICATION', [
+          kv('Sector', esc(s.sector || p.sector || '—')), kv('Industry', esc(s.industry || p.industry || '—')),
+          kv('Asset Class', 'Equity'), kv('Market', esc(q.exchange || '—')),
+          kv('Bloomberg', `${esc(q.symbol)} US`), kv('FIGI', `BBG—${esc(q.symbol)}`),
+        ])}
+        ${desPanel('MARKET DATA', [
+          kv('Last', fmtPrice(q.price), true), kv('Change', `<span class="${chgClass(q.change)}">${fmtChange(q.change, q.changePct)}</span>`),
+          kv('Open', fmtPrice(q.open)), kv('Prev Close', fmtPrice(q.prevClose)),
+          kv('Day Range', `${fmtPrice(q.dayLow)} – ${fmtPrice(q.dayHigh)}`),
+          kv('Volume', fmtBig(q.volume)), kv('Avg Volume', s.avgVolume ? fmtBig(s.avgVolume) : null),
+        ])}
+        ${desPanel('PRICE PERFORMANCE', [
+          kv('1 Day', pctv(q.changePct)), kv('1 Week', pctv(back(5))), kv('1 Month', pctv(back(21))),
+          kv('3 Month', pctv(back(63))), kv('6 Month', pctv(back(126))), kv('1 Year', pctv(back(250))),
+          kv('YTD', pctv(ytd)),
+        ])}
+        ${desPanel('VALUATION', [
+          kv('Market Cap', fmtBig(s.marketCap), true), kv('Enterprise Value', fmtBig(ev)),
+          kv('P/E (TTM)', fmtRatio(s.peTrailing)), kv('P/E (Fwd)', fmtRatio(s.peForward)),
+          kv('Price/Book', fmtRatio(s.priceToBook)), kv('EV/EBITDA', ev && s.ebitda ? fmtRatio(ev / s.ebitda) : null),
+          kv('EPS (TTM)', fmtPrice(s.eps)), kv('Beta', fmtRatio(s.beta)),
+        ])}
+        ${desPanel('PROFITABILITY', [
+          kv('Revenue (TTM)', fmtBig(s.revenue)), kv('Gross Margin', s.grossMargin != null ? fmtPct(s.grossMargin * 100) : null),
+          kv('Oper Margin', s.operatingMargin != null ? fmtPct(s.operatingMargin * 100) : null),
+          kv('Profit Margin', s.profitMargin != null ? fmtPct(s.profitMargin * 100) : null),
+          kv('ROE', s.roe != null ? fmtPct(s.roe * 100) : null), kv('ROA', s.roa != null ? fmtPct(s.roa * 100) : null),
+          kv('EBITDA', fmtBig(s.ebitda)), kv('Free Cash Flow', fmtBig(s.freeCashflow)),
+        ])}
+        ${desPanel('52-WEEK / TRADING', [
+          kv('52W High', fmtPrice(q.high52w)), kv('52W Low', fmtPrice(q.low52w)),
+          kv('% Off 52W High', off52 != null ? pctv(off52) : null),
+          kv('1Y High', c.length ? fmtPrice(Math.max(...c.map((x) => x.h))) : null),
+          kv('1Y Low', c.length ? fmtPrice(Math.min(...c.map((x) => x.l))) : null),
+        ])}
+        ${desPanel('OWNERSHIP & SHARES', [
+          kv('Shares Out', fmtBig(s.sharesOut || p.sharesOut)), kv('Float', fmtBig(s.floatShares)),
+          kv('% Insiders', s.heldPctInsiders != null ? fmtPct(s.heldPctInsiders * 100) : null),
+          kv('% Institutions', s.heldPctInstitutions != null ? fmtPct(s.heldPctInstitutions * 100) : null),
+          kv('Short % Float', s.shortPctFloat != null ? fmtPct(s.shortPctFloat * 100) : null),
+        ])}
+        ${desPanel('DIVIDENDS', [
+          kv('Div Yield', s.dividendYield ? fmtPct(s.dividendYield * 100) : '—'),
+          kv('Div Rate', s.dividendRate ? fmtPrice(s.dividendRate) : '—'),
+          kv('Payout Ratio', s.payoutRatio ? fmtPct(s.payoutRatio * 100) : '—'),
+        ])}
+        ${desPanel('ANALYST RATING', [
+          kv('Recommendation', s.recommendationKey ? `<span class="hl">${esc(s.recommendationKey.toUpperCase())}</span>` : '—'),
+          kv('Mean Target', fmtPrice(s.targetMean)), kv('High / Low', s.targetHigh ? `${fmtPrice(s.targetHigh)} / ${fmtPrice(s.targetLow)}` : null),
+          kv('Upside', s.targetMean && q.price ? pctv(((s.targetMean - q.price) / q.price) * 100) : null),
+          kv('# Analysts', s.numberOfAnalysts ? fmtRatio(s.numberOfAnalysts, 0) : null),
+          kv('Next Earnings', fmtDate(s.nextEarningsDate)),
+        ])}
+        <div class="des-panel span2"><div class="sec-bar" style="position:static">LATEST NEWS</div>
+          <div style="padding:1px 4px">${newsHTML((news.items || []), 8)}</div></div>
       </div>`;
-  } catch (err) { body.innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+  } catch (err) { wrap.innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 
 /* ----------------------------------------------------------------- FA */
@@ -870,14 +1046,36 @@ function wireRows(container) {
 
 /* -------------------------------------------------------- WEI (world) */
 
+const WEI_REGIONS = {
+  'AMERICAS': [['^GSPC', 'S&P 500'], ['^DJI', 'Dow Jones'], ['^IXIC', 'Nasdaq Comp'], ['^NDX', 'Nasdaq 100'], ['^RUT', 'Russell 2000'], ['^GSPTSE', 'S&P/TSX (CA)'], ['^BVSP', 'Bovespa (BR)'], ['^MXX', 'IPC (MX)']],
+  'EMEA': [['^FTSE', 'FTSE 100 (UK)'], ['^GDAXI', 'DAX (DE)'], ['^FCHI', 'CAC 40 (FR)'], ['^STOXX50E', 'Euro Stoxx 50'], ['^IBEX', 'IBEX 35 (ES)'], ['FTSEMIB.MI', 'FTSE MIB (IT)'], ['^AEX', 'AEX (NL)'], ['^SSMI', 'SMI (CH)']],
+  'ASIA / PACIFIC': [['^N225', 'Nikkei 225 (JP)'], ['^HSI', 'Hang Seng (HK)'], ['000001.SS', 'Shanghai (CN)'], ['^AXJO', 'ASX 200 (AU)'], ['^BSESN', 'Sensex (IN)'], ['^NSEI', 'Nifty 50 (IN)'], ['^KS11', 'KOSPI (KR)'], ['^TWII', 'Taiwan']],
+};
+const WEI_VOL = [['^VIX', 'VIX (S&P)'], ['^VXN', 'VXN (Nasdaq)'], ['^OVX', 'Oil VIX'], ['^GVZ', 'Gold VIX'], ['^RVX', 'Russell VIX']];
+const WEI_FUT = [['ES=F', 'S&P Fut'], ['NQ=F', 'Nasdaq Fut'], ['YM=F', 'Dow Fut'], ['RTY=F', 'Russell Fut'], ['NKD=F', 'Nikkei Fut'], ['GC=F', 'Gold Fut']];
+
 async function showWEI() {
   state.view = 'WEI'; setActiveTabs('WEI'); markFunc(null);
-  el('view').innerHTML = fnBar('WORLD EQUITY INDICES', 'WEI', 'WEI Monitor') + `<div id="wei-body"><div class="loading">Loading…</div></div>`;
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('WORLD EQUITY INDICES', 'WEI', 'WEI Monitor') + `<div class="wei-grid" id="wei-body"><div class="loading">Loading…</div></div></div>`;
   try {
-    const all = Object.values(WORLD).flat().map((r) => r[0]);
+    const all = [...Object.values(WEI_REGIONS).flat(), ...WEI_VOL, ...WEI_FUT].map((r) => r[0]);
     const byName = await quoteBoard(all);
-    el('wei-body').innerHTML = `<div class="grid-2">${Object.entries(WORLD).map(([region, rows]) => `
-      <div class="section">${secBar(region)}<div class="sec-body" style="padding:0">${boardTable(rows, byName)}</div></div>`).join('')}</div>`;
+    const panel = (title, rows) => `<div class="section">${secBar(title)}<div class="sec-body pad0">${boardTable(rows, byName, { spark: false })}</div></div>`;
+    // breadth across all region indices
+    const idxAll = Object.values(WEI_REGIONS).flat();
+    const up = idxAll.filter(([s]) => (byName[s] && !byName[s].error && byName[s].change > 0)).length;
+    const dn = idxAll.filter(([s]) => (byName[s] && !byName[s].error && byName[s].change < 0)).length;
+    const upPct = (up + dn) ? (up / (up + dn)) * 100 : 50;
+    el('wei-body').innerHTML =
+      Object.entries(WEI_REGIONS).map(([r, rows]) => panel(r, rows)).join('')
+      + panel('VOLATILITY INDICES', WEI_VOL)
+      + panel('INDEX FUTURES', WEI_FUT)
+      + `<div class="section">${secBar('GLOBAL BREADTH')}<div class="sec-body" style="font-family:var(--font-data)">
+          <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span class="pos">▲ ${up} Up</span><span class="neg">${dn} Down ▼</span></div>
+          <div style="height:16px;background:var(--red-down);display:flex;margin:4px 0"><div style="background:var(--green);width:${upPct}%"></div></div>
+          <div class="muted" style="font-size:11px">${fmtNum(upPct, 0)}% of world indices advancing</div>
+          <div style="margin-top:6px;font-size:12px" class="${up >= dn ? 'pos' : 'neg'}">GLOBAL RISK ${up >= dn ? 'ON' : 'OFF'}</div>
+        </div></div>`;
     wireRows(el('wei-body'));
   } catch (err) { el('wei-body').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
@@ -913,29 +1111,31 @@ async function showRates() {
 
 /* -------------------------------------------------------- MOST (movers) */
 
-let moversType = 'gainers';
-async function showMovers(type) {
-  if (type) moversType = type;
+function moversTable(rows) {
+  return `<div class="tbl-wrap"><table class="data">
+    <tr><th>SYM</th><th>NAME</th><th class="num">LAST</th><th class="num">CHG%</th><th>1D</th><th class="num">VOLUME</th></tr>
+    ${rows.map((r) => `<tr class="click" data-sym="${esc(r.symbol)}">
+      <td class="sym">${esc(r.symbol)}</td><td class="muted">${esc((r.name || '').slice(0, 22))}</td>
+      <td class="num">${fmtPrice(r.price)}</td>
+      <td class="num ${chgClass(r.change)}">${arrow(r.change)} ${fmtNum(Math.abs(r.changePct))}%</td>
+      <td class="spark-td">${sparkCell(r.symbol)}</td>
+      <td class="num">${fmtBig(r.volume)}</td>
+    </tr>`).join('')}
+  </table></div>`;
+}
+
+async function showMovers() {
   state.view = 'MOST'; setActiveTabs('MOST'); markFunc(null);
-  const tabs = `<span class="tabs">${[['gainers', 'GAINERS'], ['losers', 'LOSERS'], ['actives', 'MOST ACTIVE']]
-    .map(([t, l]) => `<button class="tab mv-tab ${t === moversType ? 'active' : ''}" data-mv="${t}">${l}</button>`).join('')}</span>`;
-  el('view').innerHTML = fnBar('US MARKET MOVERS', 'MOST', 'MOST Movers') + secBar('MOVERS', '', tabs) + `<div id="mv-body"><div class="loading">Loading…</div></div>`;
-  el('view').querySelectorAll('.mv-tab').forEach((b) => b.addEventListener('click', () => showMovers(b.dataset.mv)));
-  try {
-    const data = await api(`/api/movers?type=${moversType}`);
-    el('mv-body').innerHTML = `<div class="tbl-wrap"><table class="data">
-      <tr><th>SYM</th><th>NAME</th><th class="num">LAST</th><th class="num">CHG</th><th class="num">CHG%</th><th>1D</th><th class="num">VOLUME</th><th class="num">MKT CAP</th></tr>
-      ${data.rows.map((r) => `<tr class="click" data-sym="${esc(r.symbol)}">
-        <td class="sym">${esc(r.symbol)}</td><td class="muted">${esc((r.name || '').slice(0, 32))}</td>
-        <td class="num">${fmtPrice(r.price)}</td>
-        <td class="num ${chgClass(r.change)}">${arrow(r.change)} ${fmtNum(Math.abs(r.change))}</td>
-        <td class="num ${chgClass(r.change)}">${fmtNum(Math.abs(r.changePct))}%</td>
-        <td class="spark-td">${sparkCell(r.symbol)}</td>
-        <td class="num">${fmtBig(r.volume)}</td><td class="num">${fmtBig(r.marketCap)}</td>
-      </tr>`).join('')}
-    </table></div>`;
-    wireRows(el('mv-body'));
-  } catch (err) { el('mv-body').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('US MARKET MOVERS', 'MOST', 'MOST Movers') + `<div class="mv-grid">
+    <div class="section"><div class="sec-bar">TOP GAINERS <span class="right pos">▲</span></div><div class="sec-body pad0" id="mv-g"><div class="loading">…</div></div></div>
+    <div class="section"><div class="sec-bar">TOP LOSERS <span class="right neg">▼</span></div><div class="sec-body pad0" id="mv-l"><div class="loading">…</div></div></div>
+    <div class="section"><div class="sec-bar">MOST ACTIVE <span class="right muted">VOL</span></div><div class="sec-body pad0" id="mv-a"><div class="loading">…</div></div></div>
+  </div></div>`;
+  const ids = { gainers: 'mv-g', losers: 'mv-l', actives: 'mv-a' };
+  Object.entries(ids).forEach(([t, id]) => {
+    api(`/api/movers?type=${t}`).then((d) => { const e = el(id); if (e) { e.innerHTML = moversTable(d.rows); wireRows(e); } })
+      .catch(() => { const e = el(id); if (e) e.innerHTML = '<div class="err">unavailable</div>'; });
+  });
 }
 
 /* ----------------------------------------------------------------- FX */
