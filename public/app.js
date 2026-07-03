@@ -1915,6 +1915,73 @@ async function showNI(topic) {
   } catch (err) { el('ni-body').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 
+/* ============================ PROP: film/TV mode ============================ */
+/* Exaggerated "movie Bloomberg" set-dressing: CRT scanlines + glow +
+   oversaturation, constant tick-storms, dramatic price alerts, and an
+   optional auto-tour that cycles screens like an unattended desk. */
+
+const prop = { on: false, timers: [], tour: null };
+
+function propFlashStorm() {
+  const cells = document.querySelectorAll('#view td.num, #tape .t-px, #sec-price');
+  if (!cells.length) return;
+  const n = Math.min(cells.length, 4 + Math.floor(Math.random() * 10));
+  for (let i = 0; i < n; i++) {
+    const c = cells[Math.floor(Math.random() * cells.length)];
+    flashEl(c, Math.random() > 0.45 ? 'flash-up' : 'flash-dn');
+  }
+}
+
+const PROP_ALERT_SYMS = ['AAPL', 'NVDA', 'TSLA', 'MSFT', 'SPX', 'BTC', 'EURUSD', 'GOLD', 'WTI', 'META', 'AMZN', '10Y'];
+function propAlert() {
+  const box = el('prop-alerts'); if (!box) return;
+  const sym = PROP_ALERT_SYMS[Math.floor(Math.random() * PROP_ALERT_SYMS.length)];
+  const up = Math.random() > 0.45;
+  const pct = (0.4 + Math.random() * 4.6).toFixed(2);
+  const kinds = up
+    ? ['PRICE ALERT', 'VOLUME SPIKE', '52-WK HIGH APPROACH', 'MOMENTUM SIGNAL']
+    : ['PRICE ALERT', 'STOP WATCH', 'VOLATILITY EVENT', 'DRAWDOWN ALERT'];
+  const kind = kinds[Math.floor(Math.random() * kinds.length)];
+  const div = document.createElement('div');
+  div.className = `prop-alert ${up ? 'up' : 'dn'}`;
+  div.innerHTML = `<b>${kind}</b> ${sym} ${up ? '▲' : '▼'} ${up ? '+' : '-'}${pct}% <span class="pa-t">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>`;
+  box.prepend(div);
+  while (box.children.length > 4) box.lastChild.remove();
+  setTimeout(() => { div.classList.add('out'); setTimeout(() => div.remove(), 500); }, 6000);
+}
+
+const PROP_TOUR_CMDS = ['HOME', 'NVDA GP', 'WEI', 'AAPL FA', 'MOST', 'GMM', 'BTC-USD GP', 'CRYP', 'AAPL ANR', 'GOVT'];
+let propTourIdx = 0;
+
+function setProp(mode) {
+  const want = mode === 'OFF' ? false : true;
+  // tear down
+  prop.timers.forEach(clearInterval); prop.timers = [];
+  if (prop.tour) { clearInterval(prop.tour); prop.tour = null; }
+  document.body.classList.remove('prop');
+  const oldA = el('prop-alerts'); if (oldA) oldA.remove();
+  const oldC = el('crt'); if (oldC) oldC.remove();
+  prop.on = false;
+  if (!want) { msg('PROP mode off'); return; }
+  // build
+  prop.on = true;
+  document.body.classList.add('prop');
+  const crt = document.createElement('div'); crt.id = 'crt'; document.body.appendChild(crt);
+  const alerts = document.createElement('div'); alerts.id = 'prop-alerts'; document.body.appendChild(alerts);
+  prop.timers.push(setInterval(propFlashStorm, 650));
+  prop.timers.push(setInterval(propAlert, 9000));
+  setTimeout(propAlert, 1200);
+  if (mode === 'TOUR') {
+    prop.tour = setInterval(() => {
+      propTourIdx = (propTourIdx + 1) % PROP_TOUR_CMDS.length;
+      runCommand(PROP_TOUR_CMDS[propTourIdx], { noPush: true });
+    }, 18000);
+    msg('PROP TOUR — film mode + auto-cycling screens · PROP OFF to exit');
+  } else {
+    msg('PROP mode — film/TV set-dressing · PROP TOUR cycles screens · PROP OFF exits');
+  }
+}
+
 /* ============================ PANL: multi-panel ============================ */
 
 let panlActive = 0;
@@ -1993,6 +2060,7 @@ function showHelp() {
       <tr><td>SPX INDEX · EURUSD CRNCY · GOLD CMDTY</td><td>Yellow-key symbol mapping</td></tr>
       <tr><td>MENU</td><td>Back to previous screen · ↑/↓ recall commands · HIST history</td></tr>
       <tr><td>PANL 2 / PANL 4</td><td>Multi-panel workspace · PANEL cycles panels</td></tr>
+      <tr><td>PROP / PROP TOUR</td><td>Film/TV prop mode — CRT glow, tick-storms, alerts; TOUR auto-cycles screens</td></tr>
       <tr><td>4</td><td>Type a number + GO to open that numbered menu item</td></tr>
       <tr><td>HELP</td><td>This screen</td></tr>
     </table></div>
@@ -2098,6 +2166,7 @@ function runCommand(raw, opts = {}) {
   if (head === 'EQS' && rest.length) return showEQS(rest[0].toLowerCase());
   if (head === 'NI') return showNI(rest.join(' ') || 'markets');
   if (head === 'PANL') return showPanl(rest[0]);
+  if (head === 'PROP' || head === 'TV') return setProp((rest[0] || (prop.on ? 'OFF' : 'ON')).toUpperCase());
   if (head === 'PANEL') return cyclePanel();
 
   if (head === 'S' || head === 'SECF' || head === 'SEARCH') {
@@ -2160,7 +2229,7 @@ const FUNC_DEFS = [
   ['FX', 'Currencies'], ['CRYP', 'Crypto'], ['TOP', 'Top News'], ['NI', 'News by Topic'], ['W', 'Watchlist'],
   ['HIST', 'Command History'], ['DES', 'Description'], ['GP', 'Price Graph'], ['GIP', 'Intraday'], ['FA', 'Financial Analysis'],
   ['ERN', 'Earnings'], ['CN', 'Company News'], ['ANR', 'Analyst Recs'], ['HDS', 'Holders'], ['DVD', 'Dividends'],
-  ['HP', 'Historical Prices'], ['BQ', 'Quote'], ['PANL', 'Multi-Panel'], ['HELP', 'Guide'],
+  ['HP', 'Historical Prices'], ['BQ', 'Quote'], ['PANL', 'Multi-Panel'], ['PROP', 'Film/TV Mode'], ['HELP', 'Guide'],
 ];
 
 function yellowTag(t) {
@@ -2223,7 +2292,8 @@ async function loadTicker() {
     const w = tk.scrollWidth;
     if (window._tkTimer) clearInterval(window._tkTimer);
     window._tkTimer = setInterval(() => {
-      x -= 1; if (x < -w) x = tk.parentElement.clientWidth;
+      x -= document.body.classList.contains('prop') ? 3 : 1;
+      if (x < -w) x = tk.parentElement.clientWidth;
       tk.style.transform = `translateX(${x}px)`;
     }, 30);
   } catch { /* ignore */ }
@@ -2258,7 +2328,7 @@ const KEYS = [
   ['CRYP', 'Crypto', 'k-yellow'], ['TOP', 'News', 'k-blue'], ['DES', 'Desc', 'k-cyan'],
   ['GP', 'Graph', 'k-green'], ['FA', 'Fundmtls', 'k-cyan'], ['ERN', 'Earnings', 'k-cyan'],
   ['ANR', 'Analyst', 'k-cyan'], ['HDS', 'Holders', 'k-cyan'], ['DVD', 'Dividends', 'k-cyan'],
-  ['W', 'Watchlist', 'k-orange'], ['PANL 4', 'Panels', 'k-red'], ['HELP', 'Help', 'k-blue'],
+  ['W', 'Watchlist', 'k-orange'], ['PANL 4', 'Panels', 'k-red'], ['PROP', 'TV Mode', 'k-green'], ['HELP', 'Help', 'k-blue'],
 ];
 function buildKeybar() {
   el('keybar').innerHTML = KEYS.map(([cmd, label, cls]) =>

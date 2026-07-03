@@ -112,6 +112,7 @@ responsive layout** that collapses cleanly to mobile.
 | `W` · `W ADD NVDA` · `W DEL NVDA` | Watchlist |
 | `S apple` · `HIST` | Security finder · command history |
 | `PANL 2` / `PANL 4` | Multi-panel workspace (independent terminals) |
+| `PROP` / `PROP TOUR` | Film/TV prop mode — CRT glow, scanlines, tick-storms, price alerts; TOUR auto-cycles screens |
 | `HELP` | In-terminal command guide |
 
 **Bloomberg command grammar** is fully supported: `VOD LN EQUITY <GO>` (venue codes

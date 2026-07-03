@@ -536,6 +536,49 @@ table.fin td.est-i, .est-i, td.est-i { color: #a3c2c2 !important; }
 .panl-cell.active .panl-num { background: var(--orange); color: #000; }
 @keyframes panl-blink { 0%, 60% { outline: 1px solid var(--orange); } 61%, 100% { outline: 1px solid transparent; } }
 
+/* -------------------------------------------------- PROP (film/TV) mode */
+
+/* oversaturated, glowing "movie terminal" grade */
+body.prop #terminal, body.prop #panl { filter: saturate(1.45) contrast(1.1) brightness(1.07); }
+body.prop .pos { text-shadow: 0 0 7px rgba(0,220,100,0.9); }
+body.prop .neg { text-shadow: 0 0 7px rgba(255,70,95,0.9); }
+body.prop .hl, body.prop td.sym, body.prop .sym-cell, body.prop #sec-symbol,
+body.prop .tape-item .t-sym { text-shadow: 0 0 7px rgba(255,215,80,0.75); }
+body.prop table.data td.num, body.prop table.fin td, body.prop .kv .v { text-shadow: 0 0 6px rgba(246,163,19,0.55); }
+body.prop .sec-bar, body.prop .lp-head, body.prop .fn-name { text-shadow: 0 0 8px rgba(255,170,40,0.5); }
+body.prop #cmd { text-shadow: 0 0 7px rgba(255,228,92,0.8); }
+
+/* CRT overlay: scanlines + vignette + slow flicker + rolling band */
+#crt { position: fixed; inset: 0; z-index: 95; pointer-events: none; }
+#crt::before {
+  content: ''; position: absolute; inset: 0;
+  background:
+    repeating-linear-gradient(0deg, rgba(0,0,0,0.22) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,0.42) 100%);
+  animation: crt-flicker 4s steps(60) infinite;
+}
+#crt::after { /* slow-rolling refresh band, like a filmed CRT/LCD */
+  content: ''; position: absolute; left: 0; right: 0; height: 140px;
+  background: linear-gradient(180deg, transparent, rgba(160,220,255,0.045), transparent);
+  animation: crt-roll 7s linear infinite;
+}
+@keyframes crt-flicker { 0%, 100% { opacity: 1; } 92% { opacity: 1; } 93% { opacity: 0.86; } 94% { opacity: 1; } 97% { opacity: 0.93; } }
+@keyframes crt-roll { 0% { top: -140px; } 100% { top: 100%; } }
+
+/* dramatic price-alert stack */
+#prop-alerts { position: fixed; top: 52px; right: 8px; z-index: 96; display: flex; flex-direction: column; gap: 3px; pointer-events: none; }
+.prop-alert {
+  font-family: var(--font-data); font-size: 12px; font-weight: bold; padding: 4px 10px;
+  border: 1px solid; background: rgba(0,0,0,0.88); animation: pa-in 0.18s steps(2);
+  min-width: 250px;
+}
+.prop-alert b { letter-spacing: 0.5px; margin-right: 6px; }
+.prop-alert.up { color: var(--green); border-color: var(--green-fill); text-shadow: 0 0 8px rgba(0,220,100,0.9); }
+.prop-alert.dn { color: var(--red-down); border-color: var(--red-down); text-shadow: 0 0 8px rgba(255,70,95,0.9); }
+.prop-alert .pa-t { float: right; color: var(--muted); font-weight: normal; margin-left: 10px; text-shadow: none; }
+.prop-alert.out { opacity: 0; transition: opacity 0.4s; }
+@keyframes pa-in { 0% { opacity: 0; transform: translateX(20px); } 100% { opacity: 1; } }
+
 /* -------------------------------------------------- portrait gate */
 
 #rotate-gate { display: none; }
