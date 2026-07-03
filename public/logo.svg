@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 130" width="520" height="130" role="img" aria-label="OpenTerm">
+  <defs>
+    <linearGradient id="amber" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb62e"/>
+      <stop offset="1" stop-color="#ff7a00"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="520" height="130" fill="#04060d"/>
+  <!-- terminal tile -->
+  <rect x="14" y="25" width="86" height="80" rx="11" fill="#000" stroke="url(#amber)" stroke-width="2.5"/>
+  <text x="30" y="83" font-family="'IBM Plex Mono',Consolas,monospace" font-size="46" font-weight="800" fill="url(#amber)">&gt;</text>
+  <rect x="66" y="52" width="20" height="30" fill="url(#amber)">
+    <animate attributeName="opacity" values="1;1;0;0;1" dur="1.1s" repeatCount="indefinite"/>
+  </rect>
+  <!-- wordmark -->
+  <text x="120" y="86" font-family="'IBM Plex Mono',Consolas,monospace" font-size="58" font-weight="800" letter-spacing="1">
+    <tspan fill="#eaeaea">OPEN</tspan><tspan fill="url(#amber)">TERM</tspan>
+  </text>
+  <rect x="122" y="98" width="372" height="3" fill="url(#amber)" opacity="0.85"/>
+  <text x="123" y="118" font-family="'IBM Plex Mono',Consolas,monospace" font-size="13" letter-spacing="3" fill="#8f96a6">MARKET TERMINAL</text>
+</svg>

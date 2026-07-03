@@ -1,0 +1,17 @@
+{
+  "name": "openterm",
+  "version": "1.0.0",
+  "description": "A Bloomberg-terminal-style market dashboard built on free market data APIs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "undici": "^6.19.8"
+  }
+}

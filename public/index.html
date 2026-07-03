@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#050607">
+  <title>OPENTERM — Market Terminal</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'&gt;&lt;rect width='16' height='16' fill='%23050607'/&gt;&lt;text x='2' y='12.5' font-size='12' fill='%23f79a18' font-family='Arial' font-weight='bold'&gt;&amp;gt;&lt;/text&gt;&lt;rect x='9' y='4.5' width='4' height='7' fill='%23ffe15a'/&gt;&lt;/svg&gt;">
+  <link rel="apple-touch-icon" href="logo.svg">
+</head>
+<body>
+  <div id="terminal">
+
+    <!-- 1) top application chrome (Windows-app style command/nav toolbar) -->
+    <div id="chrome">
+      <span class="chr-nav"><button class="chr-arrow" title="Back">‹</button><button class="chr-arrow" title="Forward">›</button></span>
+      <span class="chr-field" id="chr-sec" data-cmd="">— <b class="tri">▾</b></span>
+      <span class="chr-field alt" id="chr-fn">HOME <b class="tri">▾</b></span>
+      <span class="chr-menu" data-cmd="HELP">Related Functions Menu <b class="tri">▾</b></span>
+      <span class="chr-spacer"></span>
+      <span class="chr-icons">
+        <span class="chr-msg">Msg: B.Support</span><span class="chr-ic">✉ Message</span><span class="chr-ic">★</span><span class="chr-ic">▤</span><span class="chr-ic">⚙</span><span class="chr-ic help">?</span>
+      </span>
+    </div>
+
+    <!-- 1b) open-function tab strip (modern Terminal chrome) -->
+    <div id="fn-tabs"></div>
+
+    <!-- 2) command entry strip -->
+    <div id="cmdbar">
+      <span id="cmd-caret">&gt;</span>
+      <span id="cmd-wrap">
+        <span id="cmd-mirror"></span>
+        <input id="cmd" type="text" autocomplete="off" autocapitalize="characters"
+               spellcheck="false" enterkeyhint="go"
+               placeholder="Enter command  ·  AAPL FA · MSFT DES · NVDA GP · WEI · MOST · CRYP · HELP">
+      </span>
+      <button id="go-btn">&lt;GO&gt;</button>
+      <button id="help-btn" data-cmd="HELP">HELP</button>
+    </div>
+    <div id="cmd-msg"></div>
+    <div id="autocomplete" class="hidden"></div>
+
+    <!-- 3) market ticker strip -->
+    <div id="tape-outer"><div id="tape"></div></div>
+
+    <!-- 4) per-security quote + function tab strip -->
+    <div id="sec-header" class="hidden">
+      <div id="sec-line1">
+        <span id="sec-symbol"></span>
+        <span id="sec-name"></span>
+        <span id="sec-price"></span>
+        <span id="sec-change"></span>
+        <span id="sec-detail"></span>
+      </div>
+      <div id="sec-funcs"></div>
+    </div>
+
+    <!-- 5) main function workspace -->
+    <div id="view"></div>
+
+    <!-- 6) suggested-functions status strip -->
+    <div id="suggest"></div>
+
+    <!-- 7) color-coded function keys -->
+    <div id="keybar"></div>
+
+    <!-- 7b) bottom promo banner (real terminals show these media strips) -->
+    <div id="promo"></div>
+
+    <!-- 8) status / news ticker line -->
+    <div id="statusline">
+      <span id="status-left">OPENTERM</span>
+      <span id="news-ticker-wrap"><span id="news-ticker"></span></span>
+      <span id="status-right"></span>
+    </div>
+  </div>
+
+  <!-- portrait mobile: Bloomberg is a workstation UI — ask to rotate -->
+  <div id="rotate-gate">
+    <div class="rg-box">
+      <div class="rg-icon">⟳</div>
+      <div class="rg-title">ROTATE DEVICE FOR<br>BLOOMBERG TERMINAL VIEW</div>
+      <div class="rg-sub">OPENTERM is a landscape workstation interface.<br>Turn your phone sideways to load the terminal.</div>
+      <div class="rg-prompt">&gt; <span class="rg-cur"></span></div>
+    </div>
+    <div class="rg-keys"><span>HOME</span><span>WEI</span><span>MOST</span><span>FX</span><span>CRYP</span><span>TOP</span><span>HELP</span></div>
+  </div>
+
+  <!-- bottom-right system toast -->
+  <div id="toast" class="hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
