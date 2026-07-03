@@ -117,8 +117,9 @@ responsive layout** that collapses cleanly to mobile.
 
 **Bloomberg command grammar** is fully supported: `VOD LN EQUITY <GO>` (venue codes
 LN/GY/FP/JT/HK/AU…), `SPX INDEX`, `EURUSD CRNCY`, `GOLD CMDTY`, `USGG10YR GOVT`.
-`MENU` steps back, ↑/↓ recall command history, and typing a number opens that
-numbered menu item — exactly like the real Terminal.
+`MENU` opens the numbered function menu for the loaded security, `BACK` steps
+back through screen history, ↑/↓ recall command history, and typing a number
+opens that numbered menu item — exactly like the real Terminal.
 
 The red function bar's `97) EXPORT` downloads the current table as CSV.
 Symbols use Yahoo conventions: indices `^GSPC`, FX `EURUSD=X`, futures `GC=F`,

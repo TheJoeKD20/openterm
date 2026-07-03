@@ -56,7 +56,10 @@ async function getJSON(url, headers = {}, retries = 2) {
     if (res.statusCode >= 200 && res.statusCode < 300) return res.body.json();
     await res.body.dump();
     if (attempt < retries && [429, 502, 503, 999].includes(res.statusCode)) { await sleep(200 * (attempt + 1)); continue; }
-    throw new Error(`${res.statusCode} for ${url}`);
+    // log the full URL server-side for debugging, but don't leak upstream
+    // endpoint shape/query params to the client via the error message
+    console.error(`upstream ${res.statusCode} for ${url}`);
+    throw new Error(`upstream error (${res.statusCode})`);
   }
 }
 
@@ -70,6 +73,11 @@ function cleanSymbol(raw) {
   const s = String(raw || '').trim().toUpperCase();
   if (!SYM_RE.test(s)) throw new Error('invalid symbol');
   return s;
+}
+// non-throwing variant for batch endpoints — an invalid symbol should be
+// silently dropped from a multi-symbol request, not abort the whole batch
+function tryCleanSymbol(raw) {
+  try { return cleanSymbol(raw); } catch { return null; }
 }
 
 /* ------------------------------------------------- yahoo cookie+crumb */
@@ -161,7 +169,7 @@ app.get('/api/quotes', async (req, res) => {
   try {
     const symbols = String(req.query.symbols || '')
       .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 40)
-      .map(cleanSymbol);
+      .map(tryCleanSymbol).filter(Boolean);
     const settled = await Promise.allSettled(symbols.map((s) =>
       cached(`q:${s}`, 10_000, async () => quoteFromMeta((await yahooChart(s, '1d', '1m')).meta))));
     res.json(settled.map((r, i) => (r.status === 'fulfilled'
@@ -473,7 +481,7 @@ app.get('/api/crypto', async (_req, res) => {
 app.get('/api/spark', async (req, res) => {
   try {
     const symbols = String(req.query.symbols || '')
-      .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 40).map(cleanSymbol);
+      .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 40).map(tryCleanSymbol).filter(Boolean);
     if (!symbols.length) return res.json({});
     const range = ['1d', '5d', '1mo', '3mo'].includes(req.query.range) ? req.query.range : '1d';
     const interval = range === '1d' ? '5m' : range === '5d' ? '30m' : '1d';
