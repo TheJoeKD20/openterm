@@ -22,10 +22,19 @@ function cached(key, ttlMs, fn) {
   return promise;
 }
 
-async function getJSON(url, headers = {}) {
-  const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json', ...headers } });
-  if (!res.ok) throw new Error(`${res.status} for ${url}`);
-  return res.json();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Yahoo's edge throttles transiently; retry once with backoff like server.js.
+// The thrown message deliberately omits the URL — logged server-side only,
+// never sent to the client (it would leak upstream endpoint shape).
+async function getJSON(url, headers = {}, retries = 2) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json', ...headers } });
+    if (res.ok) return res.json();
+    if (attempt < retries && [429, 502, 503, 999].includes(res.status)) { await sleep(200 * (attempt + 1)); continue; }
+    console.error(`upstream ${res.status} for ${url}`);
+    throw new Error(`upstream error (${res.status})`);
+  }
 }
 
 const SYM_RE = /^[A-Za-z0-9^.\-=]{1,15}$/;
@@ -33,6 +42,9 @@ function cleanSymbol(raw) {
   const s = String(raw || '').trim().toUpperCase();
   if (!SYM_RE.test(s)) throw new Error('invalid symbol');
   return s;
+}
+function tryCleanSymbol(raw) {
+  try { return cleanSymbol(raw); } catch { return null; }
 }
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), {
   status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
@@ -85,6 +97,12 @@ function quoteFromMeta(m) {
 }
 const RANGES = { '1d': '5m', '5d': '15m', '1mo': '1d', '3mo': '1d', '6mo': '1d', '1y': '1d', '5y': '1wk', max: '1mo' };
 const SCREENERS = { gainers: 'day_gainers', losers: 'day_losers', actives: 'most_actives' };
+const EQS_SCREENS = {
+  gainers: ['day_gainers', 'Day Gainers'], losers: ['day_losers', 'Day Losers'], actives: ['most_actives', 'Most Actives'],
+  ugrowth: ['undervalued_growth_stocks', 'Undervalued Growth'], gtech: ['growth_technology_stocks', 'Growth Technology'],
+  ularge: ['undervalued_large_caps', 'Undervalued Large Caps'], smallcap: ['small_cap_gainers', 'Small-Cap Gainers'],
+  aggsmall: ['aggressive_small_caps', 'Aggressive Small Caps'],
+};
 
 const INCOME_ROWS = [['annualTotalRevenue', 'Revenue'], ['annualCostOfRevenue', 'Cost of Revenue'], ['annualGrossProfit', 'Gross Profit'], ['annualResearchAndDevelopment', 'R&D'], ['annualSellingGeneralAndAdministration', 'SG&A'], ['annualOperatingExpense', 'Operating Expense'], ['annualOperatingIncome', 'Operating Income'], ['annualEBITDA', 'EBITDA'], ['annualEBIT', 'EBIT'], ['annualInterestExpense', 'Interest Expense'], ['annualPretaxIncome', 'Pretax Income'], ['annualTaxProvision', 'Tax Provision'], ['annualNetIncome', 'Net Income'], ['annualDilutedEPS', 'Diluted EPS'], ['annualBasicAverageShares', 'Avg Shares']];
 const BALANCE_ROWS = [['annualCashAndCashEquivalents', 'Cash & Equivalents'], ['annualOtherShortTermInvestments', 'Short-Term Investments'], ['annualAccountsReceivable', 'Accounts Receivable'], ['annualOtherReceivables', 'Other Receivables'], ['annualInventory', 'Inventory'], ['annualOtherCurrentAssets', 'Other Current Assets'], ['annualCurrentAssets', 'Total Current Assets'], ['annualGrossPPE', 'Gross PP&E'], ['annualAccumulatedDepreciation', 'Accumulated Depreciation'], ['annualNetPPE', 'Net PP&E'], ['annualGoodwill', 'Goodwill'], ['annualOtherIntangibleAssets', 'Intangibles'], ['annualOtherNonCurrentAssets', 'Other Non-Current Assets'], ['annualTotalAssets', 'Total Assets'], ['annualAccountsPayable', 'Accounts Payable'], ['annualCurrentAccruedExpenses', 'Accrued Expenses'], ['annualCurrentDeferredRevenue', 'Deferred Revenue'], ['annualCurrentDebt', 'Short-Term Debt'], ['annualCurrentLiabilities', 'Total Current Liab.'], ['annualLongTermDebt', 'Long-Term Debt'], ['annualOtherNonCurrentLiabilities', 'Other Non-Current Liab.'], ['annualTotalLiabilitiesNetMinorityInterest', 'Total Liabilities'], ['annualTotalDebt', 'Total Debt'], ['annualCommonStock', 'Common Stock'], ['annualRetainedEarnings', 'Retained Earnings'], ['annualTreasuryStock', 'Treasury Stock'], ['annualMinorityInterest', 'Minority Interest'], ['annualStockholdersEquity', 'Total Equity']];
@@ -92,7 +110,12 @@ const CASHFLOW_ROWS = [['annualOperatingCashFlow', 'Cash from Operations'], ['an
 const ALL_FIN_TYPES = [...INCOME_ROWS, ...BALANCE_ROWS, ...CASHFLOW_ROWS].map((r) => r[0]);
 
 const WMO = { 0: 'Clear', 1: 'Clear', 2: 'P.Cloudy', 3: 'Cloudy', 45: 'Fog', 48: 'Fog', 51: 'Drizzle', 53: 'Drizzle', 55: 'Drizzle', 61: 'Rain', 63: 'Rain', 65: 'Heavy Rain', 71: 'Snow', 73: 'Snow', 75: 'Snow', 80: 'Showers', 81: 'Showers', 82: 'Showers', 95: 'Storm', 96: 'Storm', 99: 'Storm' };
-const CITIES = [{ name: 'NEW YORK', lat: 40.71, lon: -74.01 }, { name: 'LONDON', lat: 51.51, lon: -0.13 }, { name: 'HONG KONG', lat: 22.32, lon: 114.17 }, { name: 'TOKYO', lat: 35.68, lon: 139.65 }];
+const CITIES = [
+  { name: 'NEW YORK', tz: 'America/New_York', lat: 40.71, lon: -74.01 },
+  { name: 'LONDON', tz: 'Europe/London', lat: 51.51, lon: -0.13 },
+  { name: 'HONG KONG', tz: 'Asia/Hong_Kong', lat: 22.32, lon: 114.17 },
+  { name: 'TOKYO', tz: 'Asia/Tokyo', lat: 35.68, lon: 139.65 },
+];
 
 /* ------------------------------------------------------------- handlers */
 async function handleApi(url, env) {
@@ -105,7 +128,7 @@ async function handleApi(url, env) {
     return json(await cached(`q:${s}`, 10_000, async () => quoteFromMeta((await yahooChart(s, '1d', '1m')).meta)));
   }
   if (p === '/api/quotes') {
-    const syms = String(qs.get('symbols') || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 40).map(cleanSymbol);
+    const syms = String(qs.get('symbols') || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 40).map(tryCleanSymbol).filter(Boolean);
     const settled = await Promise.allSettled(syms.map((s) => cached(`q:${s}`, 10_000, async () => quoteFromMeta((await yahooChart(s, '1d', '1m')).meta))));
     return json(settled.map((r, i) => (r.status === 'fulfilled' ? r.value : { symbol: syms[i], error: String(r.reason?.message || r.reason) })));
   }
@@ -121,7 +144,7 @@ async function handleApi(url, env) {
     return json({ symbol: s, range, interval: RANGES[range], meta: quoteFromMeta(result.meta), candles });
   }
   if (p === '/api/spark') {
-    const syms = String(qs.get('symbols') || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 40).map(cleanSymbol);
+    const syms = String(qs.get('symbols') || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 40).map(tryCleanSymbol).filter(Boolean);
     if (!syms.length) return json({});
     const range = ['1d', '5d', '1mo', '3mo'].includes(qs.get('range')) ? qs.get('range') : '1d';
     const interval = range === '1d' ? '5m' : range === '5d' ? '30m' : '1d';
@@ -138,7 +161,7 @@ async function handleApi(url, env) {
   }
   if (p === '/api/search') {
     const q = String(qs.get('q') || '').slice(0, 60);
-    if (!q) return json({ quotes: [] });
+    if (!q) return json({ quotes: [], news: [] });
     const data = await cached(`s:${q.toLowerCase()}`, 300_000, () => getJSON(`${YF}/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=12&newsCount=0`));
     return json({ quotes: (data.quotes || []).filter((it) => it.symbol).map((it) => ({ symbol: it.symbol, name: it.longname || it.shortname || it.symbol, exchange: it.exchDisp || it.exchange, type: it.typeDisp || it.quoteType, sector: it.sectorDisp || it.sector || '', industry: it.industryDisp || it.industry || '' })) });
   }
@@ -154,7 +177,7 @@ async function handleApi(url, env) {
       const lat = CITIES.map((c) => c.lat).join(','), lon = CITIES.map((c) => c.lon).join(',');
       const arr = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&temperature_unit=fahrenheit`);
       const list = Array.isArray(arr) ? arr : [arr];
-      return CITIES.map((c, i) => ({ name: c.name, temp: Math.round(list[i]?.current?.temperature_2m ?? 0), cond: WMO[list[i]?.current?.weather_code] || '—' }));
+      return CITIES.map((c, i) => ({ name: c.name, tz: c.tz, temp: Math.round(list[i]?.current?.temperature_2m ?? 0), cond: WMO[list[i]?.current?.weather_code] || '—' }));
     }));
   }
   if (p === '/api/fx') {
@@ -174,6 +197,15 @@ async function handleApi(url, env) {
     }));
   }
   if (p === '/api/news') {
+    // free-text topic mode (NI <topic>): ?q= bypasses symbol validation
+    if (qs.get('q')) {
+      const q = String(qs.get('q')).slice(0, 40);
+      const items = await cached(`nq:${q.toLowerCase()}`, 120_000, async () => {
+        const j = await getJSON(`${YF}/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=0&newsCount=25`);
+        return (j.news || []).map((n) => ({ title: n.title, source: n.publisher, url: n.link, time: n.providerPublishTime, summary: '' }));
+      });
+      return json({ symbol: q, items });
+    }
     const symbol = cleanSymbol(qs.get('symbol') || 'SPY');
     return json({ symbol, items: await cached(`n:${symbol}`, 120_000, async () => {
       if (FIN) {
@@ -229,11 +261,85 @@ async function handleApi(url, env) {
   if (p.startsWith('/api/profile/')) {
     const symbol = cleanSymbol(p.split('/').pop());
     return json(await cached(`p:${symbol}`, 3_600_000, async () => {
+      if (FIN) {
+        const pr = await getJSON(`https://finnhub.io/api/v1/stock/profile2?symbol=${encodeURIComponent(symbol)}&token=${FIN}`);
+        if (pr && pr.name) {
+          return {
+            name: pr.name, sector: pr.finnhubIndustry || '', industry: pr.finnhubIndustry || '',
+            exchange: pr.exchange || '', country: pr.country || '', currency: pr.currency || '',
+            marketCap: pr.marketCapitalization ? pr.marketCapitalization * 1e6 : null,
+            sharesOut: pr.shareOutstanding ? pr.shareOutstanding * 1e6 : null,
+            ipo: pr.ipo || '', web: pr.weburl || '', logo: pr.logo || '',
+          };
+        }
+      }
       const data = await getJSON(`${YF}/v1/finance/search?q=${encodeURIComponent(symbol)}&quotesCount=6&newsCount=0`);
       const hit = (data.quotes || []).find((it) => it.symbol === symbol) || (data.quotes || [])[0];
       if (!hit) return {};
       return { name: hit.longname || hit.shortname || symbol, sector: hit.sectorDisp || hit.sector || '', industry: hit.industryDisp || hit.industry || '', exchange: hit.exchDisp || hit.exchange || '', country: '', currency: '', marketCap: null, sharesOut: null, ipo: '', web: '', logo: '' };
     }));
+  }
+  if (p === '/api/trending') {
+    const syms = await cached('trending', 300_000, async () => {
+      const data = await getJSON(`${YF}/v1/finance/trending/US?count=15`);
+      return (data.finance?.result?.[0]?.quotes || []).map((q) => q.symbol).filter(Boolean);
+    });
+    return json({ symbols: syms });
+  }
+  if (p.startsWith('/api/analyst/')) {
+    const symbol = cleanSymbol(p.split('/').pop());
+    return json(await cached(`anr:${symbol}`, 1_800_000, async () => {
+      const modules = 'upgradeDowngradeHistory,recommendationTrend,financialData';
+      const j = await getAuthedJSON((crumb) => `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}&crumb=${encodeURIComponent(crumb)}`);
+      const r = j.quoteSummary?.result?.[0];
+      if (!r) throw new Error('no analyst data');
+      const fd = r.financialData || {};
+      return {
+        symbol,
+        trend: (r.recommendationTrend?.trend || []).map((t) => ({ period: t.period, strongBuy: t.strongBuy, buy: t.buy, hold: t.hold, sell: t.sell, strongSell: t.strongSell })),
+        history: (r.upgradeDowngradeHistory?.history || []).slice(0, 40).map((h) => ({ time: h.epochGradeDate, firm: h.firm, toGrade: h.toGrade, fromGrade: h.fromGrade, action: h.action, target: h.currentPriceTarget ?? null, priorTarget: h.priorPriceTarget ?? null })),
+        targetMean: num(fd.targetMeanPrice), targetHigh: num(fd.targetHighPrice), targetLow: num(fd.targetLowPrice),
+        recommendationKey: fd.recommendationKey || '', recommendationMean: num(fd.recommendationMean), numberOfAnalysts: num(fd.numberOfAnalystOpinions),
+      };
+    }));
+  }
+  if (p.startsWith('/api/holders/')) {
+    const symbol = cleanSymbol(p.split('/').pop());
+    return json(await cached(`hds:${symbol}`, 3_600_000, async () => {
+      const modules = 'institutionOwnership,insiderHolders,majorHoldersBreakdown,fundOwnership';
+      const j = await getAuthedJSON((crumb) => `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}&crumb=${encodeURIComponent(crumb)}`);
+      const r = j.quoteSummary?.result?.[0];
+      if (!r) throw new Error('no holders data');
+      const mapOwn = (list) => (list || []).map((o) => ({ name: o.organization, position: num(o.position), value: num(o.value), pctHeld: num(o.pctHeld), reportDate: o.reportDate?.fmt || '', pctChange: num(o.pctChange) }));
+      const mb = r.majorHoldersBreakdown || {};
+      return {
+        symbol,
+        institutions: mapOwn(r.institutionOwnership?.ownershipList),
+        funds: mapOwn(r.fundOwnership?.ownershipList),
+        insiders: (r.insiderHolders?.holders || []).map((h) => ({ name: h.name, relation: h.relation, position: num(h.positionDirect) ?? num(h.positionIndirect), latestTrans: h.transactionDescription || '', date: h.latestTransDate?.fmt || '' })),
+        breakdown: { insidersPct: num(mb.insidersPercentHeld), institutionsPct: num(mb.institutionsPercentHeld), institutionsFloatPct: num(mb.institutionsFloatPercentHeld), institutionsCount: num(mb.institutionsCount) },
+      };
+    }));
+  }
+  if (p.startsWith('/api/dividends/')) {
+    const symbol = cleanSymbol(p.split('/').pop());
+    return json(await cached(`dvd:${symbol}`, 3_600_000, async () => {
+      const j = await getJSON(`${YF}/v8/finance/chart/${encodeURIComponent(symbol)}?range=10y&interval=1mo&events=div%2Csplit`);
+      const r = j.chart?.result?.[0];
+      if (!r) throw new Error('no dividend data');
+      const divs = Object.values(r.events?.dividends || {}).map((d) => ({ date: d.date, amount: d.amount })).sort((a, b) => b.date - a.date);
+      const splits = Object.values(r.events?.splits || {}).map((s) => ({ date: s.date, ratio: `${s.numerator}:${s.denominator}` })).sort((a, b) => b.date - a.date);
+      return { symbol, price: r.meta?.regularMarketPrice ?? null, dividends: divs, splits };
+    }));
+  }
+  if (p === '/api/screener') {
+    const key = EQS_SCREENS[qs.get('scr')] ? qs.get('scr') : 'ugrowth';
+    const [scrId, title] = EQS_SCREENS[key];
+    const rows = await cached(`eqs:${key}`, 300_000, async () => {
+      const data = await getJSON(`${YF}/v1/finance/screener/predefined/saved?count=40&scrIds=${scrId}`);
+      return (data.finance?.result?.[0]?.quotes || []).map((q) => ({ symbol: q.symbol, name: q.shortName || q.longName || q.symbol, price: q.regularMarketPrice, change: q.regularMarketChange, changePct: q.regularMarketChangePercent, volume: q.regularMarketVolume, marketCap: q.marketCap ?? null, exchange: q.fullExchangeName || '' }));
+    });
+    return json({ key, title, screens: Object.entries(EQS_SCREENS).map(([k, [, t]]) => [k, t]), rows });
   }
   if (p === '/api/status') return json({ ok: true, finnhub: Boolean(FIN), runtime: 'cloudflare-worker' });
   return json({ error: 'not found' }, 404);
