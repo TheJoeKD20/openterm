@@ -20,9 +20,12 @@
       <span class="chr-menu" data-cmd="HELP">Related Functions Menu <b class="tri">▾</b></span>
       <span class="chr-spacer"></span>
       <span class="chr-icons">
-        <span class="chr-ic">✉ Message</span><span class="chr-ic">★</span><span class="chr-ic">▤</span><span class="chr-ic">⚙</span><span class="chr-ic help">?</span>
+        <span class="chr-msg">Msg: B.Support</span><span class="chr-ic">✉ Message</span><span class="chr-ic">★</span><span class="chr-ic">▤</span><span class="chr-ic">⚙</span><span class="chr-ic help">?</span>
       </span>
     </div>
+
+    <!-- 1b) open-function tab strip (modern Terminal chrome) -->
+    <div id="fn-tabs"></div>
 
     <!-- 2) command entry strip -->
     <div id="cmdbar">
@@ -78,6 +81,9 @@
     </div>
     <div class="rg-keys"><span>HOME</span><span>WEI</span><span>MOST</span><span>FX</span><span>CRYP</span><span>TOP</span><span>HELP</span></div>
   </div>
+
+  <!-- bottom-right system toast -->
+  <div id="toast" class="hidden"></div>
 
   <script src="app.js"></script>
 </body>

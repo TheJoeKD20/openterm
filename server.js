@@ -333,6 +333,8 @@ app.get('/api/summary/:symbol', async (req, res) => {
         high52w: num(sd.fiftyTwoWeekHigh),
         low52w: num(sd.fiftyTwoWeekLow),
         avgVolume: num(sd.averageVolume),
+        bid: num(sd.bid), ask: num(sd.ask),
+        bidSize: num(sd.bidSize), askSize: num(sd.askSize),
         nextEarningsDate: (ce.earnings?.earningsDate || []).map(num).filter(Boolean)[0] || null,
         earningsQuarterly,
         yearly,
@@ -346,6 +348,16 @@ app.get('/api/summary/:symbol', async (req, res) => {
 
 app.get('/api/news', async (req, res) => {
   try {
+    // free-text topic mode (NI <topic>): ?q= bypasses symbol validation
+    if (req.query.q) {
+      const q = String(req.query.q).slice(0, 40);
+      const data = await cached(`nq:${q.toLowerCase()}`, 120_000, async () => {
+        const url = `${YF}/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=0&newsCount=25`;
+        const j = await getJSON(url);
+        return (j.news || []).map((n) => ({ title: n.title, source: n.publisher, url: n.link, time: n.providerPublishTime, summary: '' }));
+      });
+      return res.json({ symbol: q, items: data });
+    }
     const symbol = cleanSymbol(req.query.symbol || 'SPY');
     const items = await cached(`n:${symbol}`, 120_000, async () => {
       if (FINNHUB_KEY) {
@@ -580,6 +592,118 @@ app.get('/api/financials/:symbol', async (req, res) => {
       return { symbol, years, income: rows(INCOME_ROWS), balance: rows(BALANCE_ROWS), cashflow: rows(CASHFLOW_ROWS) };
     });
     res.json(data);
+  } catch (err) { fail(res, err); }
+});
+
+/* -------------------------------------------------- ANR: analyst recs */
+
+app.get('/api/analyst/:symbol', async (req, res) => {
+  try {
+    const symbol = cleanSymbol(req.params.symbol);
+    const data = await cached(`anr:${symbol}`, 1_800_000, async () => {
+      const modules = 'upgradeDowngradeHistory,recommendationTrend,financialData';
+      const json = await getAuthedJSON((crumb) =>
+        `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}&crumb=${encodeURIComponent(crumb)}`);
+      const r = json.quoteSummary?.result?.[0];
+      if (!r) throw new Error('no analyst data');
+      const fd = r.financialData || {};
+      return {
+        symbol,
+        trend: (r.recommendationTrend?.trend || []).map((t) => ({
+          period: t.period, strongBuy: t.strongBuy, buy: t.buy, hold: t.hold, sell: t.sell, strongSell: t.strongSell,
+        })),
+        history: (r.upgradeDowngradeHistory?.history || []).slice(0, 40).map((h) => ({
+          time: h.epochGradeDate, firm: h.firm, toGrade: h.toGrade, fromGrade: h.fromGrade,
+          action: h.action, target: h.currentPriceTarget ?? null, priorTarget: h.priorPriceTarget ?? null,
+        })),
+        targetMean: num(fd.targetMeanPrice), targetHigh: num(fd.targetHighPrice), targetLow: num(fd.targetLowPrice),
+        recommendationKey: fd.recommendationKey || '', recommendationMean: num(fd.recommendationMean),
+        numberOfAnalysts: num(fd.numberOfAnalystOpinions),
+      };
+    });
+    res.json(data);
+  } catch (err) { fail(res, err); }
+});
+
+/* -------------------------------------------------- HDS: holders */
+
+app.get('/api/holders/:symbol', async (req, res) => {
+  try {
+    const symbol = cleanSymbol(req.params.symbol);
+    const data = await cached(`hds:${symbol}`, 3_600_000, async () => {
+      const modules = 'institutionOwnership,insiderHolders,majorHoldersBreakdown,fundOwnership';
+      const json = await getAuthedJSON((crumb) =>
+        `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}&crumb=${encodeURIComponent(crumb)}`);
+      const r = json.quoteSummary?.result?.[0];
+      if (!r) throw new Error('no holders data');
+      const mapOwn = (list) => (list || []).map((o) => ({
+        name: o.organization, position: num(o.position), value: num(o.value),
+        pctHeld: num(o.pctHeld), reportDate: o.reportDate?.fmt || '', pctChange: num(o.pctChange),
+      }));
+      const mb = r.majorHoldersBreakdown || {};
+      return {
+        symbol,
+        institutions: mapOwn(r.institutionOwnership?.ownershipList),
+        funds: mapOwn(r.fundOwnership?.ownershipList),
+        insiders: (r.insiderHolders?.holders || []).map((h) => ({
+          name: h.name, relation: h.relation, position: num(h.positionDirect) ?? num(h.positionIndirect),
+          latestTrans: h.transactionDescription || '', date: h.latestTransDate?.fmt || '',
+        })),
+        breakdown: {
+          insidersPct: num(mb.insidersPercentHeld), institutionsPct: num(mb.institutionsPercentHeld),
+          institutionsFloatPct: num(mb.institutionsFloatPercentHeld), institutionsCount: num(mb.institutionsCount),
+        },
+      };
+    });
+    res.json(data);
+  } catch (err) { fail(res, err); }
+});
+
+/* -------------------------------------------------- DVD: dividends */
+
+app.get('/api/dividends/:symbol', async (req, res) => {
+  try {
+    const symbol = cleanSymbol(req.params.symbol);
+    const data = await cached(`dvd:${symbol}`, 3_600_000, async () => {
+      const url = `${YF}/v8/finance/chart/${encodeURIComponent(symbol)}?range=10y&interval=1mo&events=div%2Csplit`;
+      const j = await getJSON(url);
+      const r = j.chart?.result?.[0];
+      if (!r) throw new Error('no dividend data');
+      const divs = Object.values(r.events?.dividends || {})
+        .map((d) => ({ date: d.date, amount: d.amount }))
+        .sort((a, b) => b.date - a.date);
+      const splits = Object.values(r.events?.splits || {})
+        .map((s) => ({ date: s.date, ratio: `${s.numerator}:${s.denominator}` }))
+        .sort((a, b) => b.date - a.date);
+      return { symbol, price: r.meta?.regularMarketPrice ?? null, dividends: divs, splits };
+    });
+    res.json(data);
+  } catch (err) { fail(res, err); }
+});
+
+/* -------------------------------------------------- EQS: screener */
+
+const EQS_SCREENS = {
+  gainers: ['day_gainers', 'Day Gainers'],
+  losers: ['day_losers', 'Day Losers'],
+  actives: ['most_actives', 'Most Actives'],
+  ugrowth: ['undervalued_growth_stocks', 'Undervalued Growth'],
+  gtech: ['growth_technology_stocks', 'Growth Technology'],
+  ularge: ['undervalued_large_caps', 'Undervalued Large Caps'],
+  smallcap: ['small_cap_gainers', 'Small-Cap Gainers'],
+  aggsmall: ['aggressive_small_caps', 'Aggressive Small Caps'],
+};
+
+app.get('/api/screener', async (req, res) => {
+  try {
+    const key = EQS_SCREENS[req.query.scr] ? req.query.scr : 'ugrowth';
+    const [scrId, title] = EQS_SCREENS[key];
+    const rows = await cached(`eqs:${key}`, 300_000, async () => {
+      const url = `${YF}/v1/finance/screener/predefined/saved?count=40&scrIds=${scrId}`;
+      const data = await getJSON(url);
+      return (data.finance?.result?.[0]?.quotes || []).map(moverRow);
+    });
+    res.json({ key, title, screens: Object.entries(EQS_SCREENS).map(([k, [, t]]) => [k, t]), rows });
   } catch (err) { fail(res, err); }
 });
 

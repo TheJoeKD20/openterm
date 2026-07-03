@@ -101,11 +101,23 @@ responsive layout** that collapses cleanly to mobile.
 | `AAPL FA` | Financial analysis — overview + multi-year statements + ratios |
 | `AAPL ERN` | Earnings — quarterly surprise & annual trend |
 | `AAPL CN` | Company news |
+| `AAPL ANR` | Analyst recommendations — trend bars, targets, rating changes |
+| `AAPL HDS` | Holders — institutions, funds, insiders, breakdown |
+| `AAPL DVD` | Dividend & split history with growth and yield |
+| `AAPL HP` | Historical price table (OHLCV) |
+| `AAPL BQ` | Composite quote — bid/ask×size, ranges, intraday |
 | `WEI` · `MOST` · `CMDTY` · `GOVT` | World indices · movers · commodities · rates |
-| `FX` · `CRYP` · `TOP` | Currencies · crypto · top news |
+| `EQS` · `GMM` · `BTMM` | Equity screener · global macro movers · money markets |
+| `FX` · `CRYP` · `TOP` · `NI tech` | Currencies · crypto · top news · news by topic |
 | `W` · `W ADD NVDA` · `W DEL NVDA` | Watchlist |
-| `S apple` | Security finder |
+| `S apple` · `HIST` | Security finder · command history |
+| `PANL 2` / `PANL 4` | Multi-panel workspace (independent terminals) |
 | `HELP` | In-terminal command guide |
+
+**Bloomberg command grammar** is fully supported: `VOD LN EQUITY <GO>` (venue codes
+LN/GY/FP/JT/HK/AU…), `SPX INDEX`, `EURUSD CRNCY`, `GOLD CMDTY`, `USGG10YR GOVT`.
+`MENU` steps back, ↑/↓ recall command history, and typing a number opens that
+numbered menu item — exactly like the real Terminal.
 
 The red function bar's `97) EXPORT` downloads the current table as CSV.
 Symbols use Yahoo conventions: indices `^GSPC`, FX `EURUSD=X`, futures `GC=F`,
@@ -180,6 +192,13 @@ browser (public/)                    proxy (server.js  ·  worker.js)      upstr
 | `FINNHUB_API_KEY` | *(unset)* | Optional — richer news/profiles |
 
 ---
+
+## 🔤 Typography
+
+The real Terminal uses **Bloomberg Prop Unicode** (Matthew Carter), which is
+proprietary. OpenTerm bundles **Roboto Condensed** (variable WOFF2, Apache-2.0
+licence — see `public/fonts/`), the closest open match, self-hosted so every
+OS renders identically, with tabular numerals throughout.
 
 ## ⚠️ Disclaimers
 

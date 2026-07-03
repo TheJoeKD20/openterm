@@ -140,6 +140,8 @@ const RATE_FUT = [['ZT=F', '2Y T-Note'], ['ZF=F', '5Y T-Note'], ['ZN=F', '10Y T-
 const SEC_FUNCS = [
   ['DES', 'Description'], ['GP', 'Price Graph'], ['GIP', 'Intraday'],
   ['FA', 'Fundamentals'], ['ERN', 'Earnings'], ['CN', 'News'],
+  ['ANR', 'Analyst Recs'], ['HDS', 'Holders'], ['DVD', 'Dividends'],
+  ['HP', 'Hist Prices'], ['BQ', 'Quote'],
 ];
 
 /* -------------------------------------------------------------- msg */
@@ -239,10 +241,24 @@ function renderSecHeader(q) {
   const c = el('sec-change');
   c.textContent = fmtChange(q.change, q.changePct);
   c.className = chgClass(q.change);
-  el('sec-detail').textContent =
-    `${[q.exchange, q.currency].filter(Boolean).join(' · ')}`
-    + (q.marketTime ? ` · As of ${new Date(q.marketTime * 1000).toLocaleString()} ${q.timezone}` : '')
-    + ` · Prev ${fmtPrice(q.prevClose)} · O ${fmtPrice(q.open)} · H ${fmtPrice(q.dayHigh)} · L ${fmtPrice(q.dayLow)} · Vol ${fmtBig(q.volume)}`;
+  flashEl(p, tickDir('HDR:' + q.symbol, q.price));
+  // real Terminal quote-line grammar: squiggle · N bid/ask N size · At · Vol · OHL · Val
+  el('sec-detail').innerHTML =
+    `<canvas id="sec-squig" width="120" height="26" style="width:60px;height:13px;vertical-align:-2px"></canvas>`
+    + ` <span id="sec-ba" class="hl">N —/— N</span>`
+    + ` · At ${q.marketTime ? new Date(q.marketTime * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'} d`
+    + ` · Vol ${fmtBig(q.volume)}`
+    + ` · O ${fmtPrice(q.open)}N · H ${fmtPrice(q.dayHigh)}N · L ${fmtPrice(q.dayLow)}D`
+    + ` · Val ${q.price && q.volume ? fmtBig(q.price * q.volume) : '—'}`
+    + ` · ${esc([q.exchange, q.currency].filter(Boolean).join(' · '))}`;
+  api(`/api/spark?symbols=${encodeURIComponent(q.symbol)}&range=1d`).then((d) => {
+    const sp = d[q.symbol], c = el('sec-squig');
+    if (sp && c) drawSpark(c, sp.close, sp.prev);
+  }).catch(() => {});
+  api(`/api/summary/${encodeURIComponent(q.symbol)}`).then((sm) => {
+    const b = el('sec-ba');
+    if (b && sm.bid && sm.ask) b.textContent = `N ${fmtPrice(sm.bid)}/${fmtPrice(sm.ask)} N ${fmtRatio(sm.bidSize, 0)}x${fmtRatio(sm.askSize, 0)}`;
+  }).catch(() => {});
   el('sec-funcs').innerHTML = SEC_FUNCS.map(([code, label], i) =>
     `<button class="sec-func" data-func="${code}"><span class="n">${i + 1})</span>${code} <span class="muted">${label}</span></button>`).join('');
   el('sec-funcs').querySelectorAll('.sec-func').forEach((b) =>
@@ -264,11 +280,69 @@ function setSuggest(html) {
   s.classList.add('show');
 }
 
+/* ------------------------------------------ open-function tab strip */
+
+const tabs = [];
+function setTab(label, cmd) {
+  state.currentTabCmd = cmd;
+  const i = tabs.findIndex((t) => t.cmd === cmd);
+  if (i === -1) { tabs.push({ label, cmd }); if (tabs.length > 8) tabs.shift(); }
+  else tabs[i].label = label;
+  renderTabs();
+}
+function renderTabs() {
+  const box = el('fn-tabs'); if (!box) return;
+  box.innerHTML = `<button class="ftab new" data-cmd="HOME">＋&nbsp;New Tab</button>` + tabs.map((t) =>
+    `<span class="ftab ${t.cmd === state.currentTabCmd ? 'active' : ''}" data-cmd="${esc(t.cmd)}">${esc(t.label)}<b class="ftab-x" data-x="${esc(t.cmd)}">✕</b></span>`).join('');
+  box.querySelectorAll('.ftab').forEach((b) => b.addEventListener('click', (e) => {
+    if (e.target.classList.contains('ftab-x')) return;
+    runCommand(b.dataset.cmd);
+  }));
+  box.querySelectorAll('.ftab-x').forEach((x) => x.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const idx = tabs.findIndex((t) => t.cmd === x.dataset.x);
+    if (idx !== -1) tabs.splice(idx, 1);
+    if (state.currentTabCmd === x.dataset.x) { const nxt = tabs[tabs.length - 1]; nxt ? runCommand(nxt.cmd) : runCommand('HOME'); }
+    else renderTabs();
+  }));
+}
+
+/* --------------------------------------------------- tick flashing */
+
+const PREVPX = {};
+function tickDir(key, price) {
+  const p = PREVPX[key]; PREVPX[key] = price;
+  if (p == null || price == null || p === price) return '';
+  return price > p ? 'flash-up' : 'flash-dn';
+}
+function flashEl(elm, dir) {
+  if (!elm || !dir) return;
+  elm.classList.remove('flash-up', 'flash-dn');
+  void elm.offsetWidth;
+  elm.classList.add(dir);
+}
+
+/* --------------------------------------------------- system toast */
+
+let toastShown = false;
+function showToast() {
+  if (toastShown) return; toastShown = true;
+  const t = el('toast'); if (!t) return;
+  t.className = '';
+  t.innerHTML = `<div class="toast-t">Compatible Launchpad View Found</div>
+    <div class="toast-b">A new view was loaded, but "Vista OpenTerm" will fit on this computer display. Open it?</div>
+    <div class="toast-btns"><button id="toast-y">Yes, open "Vista OpenTerm"</button><button id="toast-n">Open another view…</button></div>`;
+  const close = () => t.classList.add('hidden');
+  el('toast-y').onclick = close; el('toast-n').onclick = close;
+  setTimeout(close, 20000);
+}
+
 function markFunc(code) {
   state.func = code;
   document.querySelectorAll('.sec-func').forEach((b) =>
     b.classList.toggle('active', b.dataset.func === code));
   if (code && state.symbol) setChrome(`${state.symbol} US Equity`, code);
+  if (code && state.symbol) setTab(`${code} ${state.symbol} US Equity`, `${state.symbol} ${code}`);
   if (code && state.symbol && ['GP', 'GIP', 'DES', 'FA', 'ERN', 'CN'].includes(code)) {
     setSuggest('<span class="sg">Suggested Functions &nbsp; <b>DES</b> Description &nbsp;·&nbsp; <b>GP</b> Graph &nbsp;·&nbsp; <b>FA</b> Fundamentals &nbsp;·&nbsp; <b>ERN</b> Earnings &nbsp;·&nbsp; <b>CN</b> News</span>');
   } else {
@@ -284,6 +358,11 @@ function runFunc(code) {
   if (code === 'FA') return showFA();
   if (code === 'ERN') return showERN();
   if (code === 'CN' || code === 'N') return showNews();
+  if (code === 'ANR') return showANR();
+  if (code === 'HDS') return showHDS();
+  if (code === 'DVD') return showDVD();
+  if (code === 'HP') return showHP();
+  if (code === 'BQ') return showBQ();
   return showChart('6mo');
 }
 
@@ -732,11 +811,12 @@ function statementTable(years, sections, unit) {
     + `<tr><th class="fin-unit muted" style="font-size:10px">12 Months Ending</th>${years.map((y, i) => `<th class="num muted${hi(i)}" style="font-size:10px">12/31/${esc(y)}</th>`).join('')}</tr>`;
   const bodyHTML = sections.map((sec) => {
     const grp = `<tr class="grp"><td class="fin-label"><span class="tri-c">▼</span>${esc(sec.label)}</td>${years.map((_, i) => `<td class="${hi(i)}"></td>`).join('')}</tr>`;
+    const iceCls = sec.ice ? ' est-i' : '';
     const rows = sec.rows.map((r) => `<tr>
       <td class="fin-label indent">${GLYPH}<span>${esc(r.label)}</span></td>
       ${r.values.map((v, i) => (v == null
         ? `<td class="dash${hi(i)}">–</td>`
-        : `<td class="num${hi(i)}">${r.fmt ? r.fmt(v) : fmtFin(v, r.label)}</td>`)).join('')}
+        : `<td class="num${hi(i)}${iceCls}">${r.fmt ? r.fmt(v) : fmtFin(v, r.label)}</td>`)).join('')}
     </tr>`).join('');
     return grp + rows;
   }).join('');
@@ -784,7 +864,7 @@ function derivedSections(fin, which) {
         drow('Book Value / Share', (i) => (sh[i] ? te[i] / sh[i] : null), asN),
         drow('Diluted EPS', (i) => eps[i], asN),
       ] },
-      { label: 'VALUATION (CURRENT)', rows: [
+      { label: 'VALUATION (CURRENT)', ice: true, rows: [
         { label: 'Market Cap', values: first(s.marketCap), fmt: fmtBig },
         { label: 'Enterprise Value', values: first(ev), fmt: fmtBig },
         { label: 'EV / EBITDA', values: first(ev && s.ebitda ? ev / s.ebitda : null), fmt: asN },
@@ -1006,7 +1086,7 @@ async function showNews() {
 }
 
 async function showTopNews() {
-  state.view = 'TOP'; setActiveTabs('TOP'); markFunc(null);
+  state.view = 'TOP'; setActiveTabs('TOP'); markFunc(null); setTab('TOP Top News', 'TOP');
   el('view').innerHTML = fnBar('TOP MARKET NEWS', 'TOP', 'TOP News') + `<div class="sec-body"><div class="loading">Loading…</div></div>`;
   const body = el('view').querySelector('.sec-body');
   try {
@@ -1020,7 +1100,7 @@ async function showTopNews() {
 async function quoteBoard(symbols) {
   const quotes = await api(`/api/quotes?symbols=${encodeURIComponent(symbols.join(','))}`);
   const byName = {};
-  quotes.forEach((q) => { byName[q.symbol] = q; });
+  quotes.forEach((q) => { q._flash = q.error ? '' : tickDir(q.symbol, q.price); byName[q.symbol] = q; });
   return byName;
 }
 
@@ -1035,7 +1115,7 @@ function boardTable(rows, byName, opts = {}) {
       if (!q || q.error) return `<tr><td>${esc(label)}</td><td class="num muted" colspan="${spark ? 4 : 3}">n/a</td>${extraCell(null)}</tr>`;
       return `<tr class="click" data-sym="${esc(sym)}">
         <td><span class="sym-cell">${esc(label)}</span></td>
-        <td class="num">${fmtPrice(q.price)}</td>
+        <td class="num ${q._flash || ''}">${fmtPrice(q.price)}</td>
         <td class="num ${chgClass(q.change)}">${arrow(q.change)} ${fmtNum(Math.abs(q.change))}</td>
         <td class="num ${chgClass(q.change)}">${fmtNum(Math.abs(q.changePct))}%</td>
         ${spark ? `<td class="spark-td">${sparkCell(sym)}</td>` : ''}
@@ -1062,7 +1142,7 @@ const WEI_VOL = [['^VIX', 'VIX (S&P)'], ['^VXN', 'VXN (Nasdaq)'], ['^OVX', 'Oil 
 const WEI_FUT = [['ES=F', 'S&P Fut'], ['NQ=F', 'Nasdaq Fut'], ['YM=F', 'Dow Fut'], ['RTY=F', 'Russell Fut'], ['NKD=F', 'Nikkei Fut'], ['GC=F', 'Gold Fut']];
 
 async function showWEI() {
-  state.view = 'WEI'; setActiveTabs('WEI'); markFunc(null);
+  state.view = 'WEI'; setActiveTabs('WEI'); markFunc(null); setTab('WEI World Eq Idx', 'WEI');
   el('view').innerHTML = `<div class="fa-screen">` + fnBar('WORLD EQUITY INDICES', 'WEI', 'WEI Monitor') + `<div class="wei-grid" id="wei-body"><div class="loading">Loading…</div></div></div>`;
   try {
     const all = [...Object.values(WEI_REGIONS).flat(), ...WEI_VOL, ...WEI_FUT].map((r) => r[0]);
@@ -1079,7 +1159,7 @@ async function showWEI() {
       + panel('INDEX FUTURES', WEI_FUT)
       + `<div class="section">${secBar('GLOBAL BREADTH')}<div class="sec-body" style="font-family:var(--font-data)">
           <div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span class="pos">▲ ${up} Up</span><span class="neg">${dn} Down ▼</span></div>
-          <div style="height:16px;background:var(--red-down);display:flex;margin:4px 0"><div style="background:var(--green);width:${upPct}%"></div></div>
+          <div style="height:16px;background:var(--red-down);display:flex;margin:4px 0"><div style="background:var(--green-fill);width:${upPct}%"></div></div>
           <div class="muted" style="font-size:11px">${fmtNum(upPct, 0)}% of world indices advancing</div>
           <div style="margin-top:6px;font-size:12px" class="${up >= dn ? 'pos' : 'neg'}">GLOBAL RISK ${up >= dn ? 'ON' : 'OFF'}</div>
         </div></div>`;
@@ -1097,6 +1177,29 @@ function loadMonChart(id, symbol, color, range = '1d') {
   }).catch(() => {});
 }
 
+function drawDonut(canvas, segs) {
+  if (!canvas || !segs.length) return;
+  const dpr = window.devicePixelRatio || 1;
+  const rct = canvas.getBoundingClientRect();
+  if (!rct.width) return;
+  canvas.width = rct.width * dpr; canvas.height = rct.height * dpr;
+  const cx = canvas.getContext('2d'); cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = rct.width, H = rct.height, R = Math.min(W, H) / 2 - 2, ir = R * 0.55;
+  const total = segs.reduce((a, sg) => a + sg.v, 0) || 1;
+  let a0 = -Math.PI / 2;
+  for (const sg of segs) {
+    const a1 = a0 + (sg.v / total) * Math.PI * 2;
+    cx.beginPath();
+    cx.moveTo(W / 2 + Math.cos(a0) * ir, H / 2 + Math.sin(a0) * ir);
+    cx.arc(W / 2, H / 2, R, a0, a1);
+    cx.arc(W / 2, H / 2, ir, a1, a0, true);
+    cx.closePath();
+    cx.fillStyle = sg.color; cx.fill();
+    cx.strokeStyle = '#000'; cx.lineWidth = 1; cx.stroke();
+    a0 = a1;
+  }
+}
+
 const CMDTY_GROUPS = {
   'ENERGY': [['CL=F', 'WTI Crude'], ['BZ=F', 'Brent Crude'], ['NG=F', 'Natural Gas'], ['RB=F', 'Gasoline'], ['HO=F', 'Heating Oil']],
   'METALS': [['GC=F', 'Gold'], ['SI=F', 'Silver'], ['PL=F', 'Platinum'], ['PA=F', 'Palladium'], ['HG=F', 'Copper']],
@@ -1105,7 +1208,7 @@ const CMDTY_GROUPS = {
 };
 
 async function showCommodities() {
-  state.view = 'CMDTY'; setActiveTabs(null); markFunc(null);
+  state.view = 'CMDTY'; setActiveTabs(null); markFunc(null); setTab('CMDTY Commodities', 'CMDTY');
   el('view').innerHTML = `<div class="fa-screen">` + fnBar('COMMODITIES', 'CMDTY', 'CMDTY Monitor') + `<div class="mon-grid cols-3 tfill" id="cmdty-body">
     <div class="section">${secBar('ENERGY')}<div class="sec-body pad0" id="cm-energy"><div class="loading">…</div></div></div>
     <div class="section">${secBar('METALS')}<div class="sec-body pad0" id="cm-metals"><div class="loading">…</div></div></div>
@@ -1126,7 +1229,7 @@ async function showCommodities() {
 /* -------------------------------------------------------- GOVT / rates */
 
 async function showRates() {
-  state.view = 'GOVT'; setActiveTabs(null); markFunc(null);
+  state.view = 'GOVT'; setActiveTabs(null); markFunc(null); setTab('GOVT Rates', 'GOVT');
   const YIELDS = [['^IRX', 'US 3-Month'], ['^FVX', 'US 5-Year'], ['^TNX', 'US 10-Year'], ['^TYX', 'US 30-Year']];
   el('view').innerHTML = `<div class="fa-screen">` + fnBar('US TREASURY YIELDS & FUTURES', 'GOVT', 'GOVT Monitor') + `<div class="mon-grid cols-2 tfill">
     <div class="section">${secBar('BENCHMARK YIELDS (%)')}<div class="sec-body pad0" id="gv-yield"><div class="loading">…</div></div></div>
@@ -1165,7 +1268,7 @@ function moversTable(rows) {
 }
 
 async function showMovers() {
-  state.view = 'MOST'; setActiveTabs('MOST'); markFunc(null);
+  state.view = 'MOST'; setActiveTabs('MOST'); markFunc(null); setTab('MOST Movers', 'MOST');
   el('view').innerHTML = `<div class="fa-screen">` + fnBar('US MARKET MOVERS', 'MOST', 'MOST Movers') + `<div class="mv-grid">
     <div class="section"><div class="sec-bar">TOP GAINERS <span class="right pos">▲</span></div><div class="sec-body pad0" id="mv-g"><div class="loading">…</div></div></div>
     <div class="section"><div class="sec-bar">TOP LOSERS <span class="right neg">▼</span></div><div class="sec-body pad0" id="mv-l"><div class="loading">…</div></div></div>
@@ -1181,7 +1284,7 @@ async function showMovers() {
 /* ----------------------------------------------------------------- FX */
 
 async function showFX() {
-  state.view = 'FX'; setActiveTabs(null); markFunc(null);
+  state.view = 'FX'; setActiveTabs(null); markFunc(null); setTab('FX Currencies', 'FX');
   el('view').innerHTML = `<div class="fa-screen">` + fnBar('CURRENCY RATES (ECB REFERENCE)', 'FX', 'FX Monitor') + `<div class="mon-grid cols-2 tfill">
     <div class="section">${secBar('USD MAJORS')}<div class="sec-body pad0" id="fx-maj"><div class="loading">…</div></div></div>
     <div class="section">${secBar('USD EM / ASIA')}<div class="sec-body pad0" id="fx-em"><div class="loading">…</div></div></div>
@@ -1216,7 +1319,7 @@ async function showFX() {
 /* -------------------------------------------------------------- crypto */
 
 async function showCrypto() {
-  state.view = 'CRYP'; setActiveTabs(null); markFunc(null);
+  state.view = 'CRYP'; setActiveTabs(null); markFunc(null); setTab('CRYP Crypto', 'CRYP');
   el('view').innerHTML = `<div class="fa-screen">` + fnBar('CRYPTOCURRENCY MARKET', 'CRYP', 'CRYP Monitor') + `<div class="mon-grid cols-3">
     <div class="section span2 rows2">${secBar('CRYPTOCURRENCY MARKET · TOP 25', 'CoinGecko')}<div class="sec-body pad0" id="cy-tbl"><div class="loading">…</div></div></div>
     <div class="section">${secBar('BTC-USD · INTRADAY')}<div class="sec-body pad0"><div class="mon-chart"><canvas id="cy-btc"></canvas></div></div></div>
@@ -1251,7 +1354,7 @@ async function showCrypto() {
 /* ---------------------------------------------------------- watchlist */
 
 async function showWatchlist() {
-  state.view = 'W'; setActiveTabs('W'); markFunc(null);
+  state.view = 'W'; setActiveTabs('W'); markFunc(null); setTab('W Watchlist', 'W');
   el('view').innerHTML = fnBar('WATCHLIST / PORTFOLIO', 'W', 'W Portfolio') + `<div id="wl-body"><div class="loading">Loading…</div></div>`;
   if (!state.watchlist.length) { el('wl-body').innerHTML = '<div class="muted" style="padding:12px">Watchlist empty. Add with <span class="hl">W ADD NVDA</span>.</div>'; return; }
   try {
@@ -1282,7 +1385,7 @@ async function showWatchlist() {
 /* ------------------------------------------------------------ SEARCH */
 
 async function showSearch(query) {
-  state.view = 'SECF'; setActiveTabs(null); markFunc(null);
+  state.view = 'SECF'; setActiveTabs(null); markFunc(null); setTab(`SECF ${query}`.slice(0, 24), `S ${query}`);
   el('view').innerHTML = fnBar('SECURITY FINDER', 'SECF', 'SECF Search') + `<div id="sf-body"><div class="loading">Searching…</div></div>`;
   try {
     const data = await api(`/api/search?q=${encodeURIComponent(query)}`);
@@ -1306,13 +1409,23 @@ const SECTORS = [['XLK', 'Technology'], ['XLF', 'Financials'], ['XLV', 'Health C
   ['XLU', 'Utilities'], ['XLRE', 'Real Estate'], ['XLC', 'Comm Svcs']];
 let lpWeather = [];
 
+function wxGlyph(cond) {
+  if (/Clear/.test(cond)) return '☀';
+  if (/P\.Cloudy/.test(cond)) return '⛅';
+  if (/Cloudy|Fog/.test(cond)) return '☁';
+  if (/Storm/.test(cond)) return '⛈';
+  if (/Snow/.test(cond)) return '❄';
+  if (/Rain|Drizzle|Showers/.test(cond)) return '🌧';
+  return '☀';
+}
+
 function renderLpClocks() {
   const box = el('lp-clocks');
   if (!box) return;
   box.innerHTML = LP_CITIES.map(([name, tz]) => {
     const t = new Date().toLocaleTimeString('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const w = lpWeather.find((x) => x.name === name);
-    return `<div class="lp-clock"><div class="lp-city">${esc(name)}</div><div class="lp-time">${t}</div><div class="lp-wx">${w ? `${w.temp}°F · ${esc(w.cond)}` : ''}</div></div>`;
+    return `<div class="lp-clock"><div class="lp-city">${esc(name)}</div><div class="lp-time">${t}</div><div class="lp-wx">${w ? `${wxGlyph(w.cond)} ${w.temp}°F · ${esc(w.cond)}` : ''}</div></div>`;
   }).join('');
 }
 
@@ -1323,7 +1436,7 @@ function heatGrid(rows, byName) {
     const q = byName[sym];
     const p = q && !q.error ? q.changePct : 0;
     const a = Math.min(0.85, Math.abs(p) / 6 * 0.7 + 0.15);
-    const bg = q && !q.error ? (p >= 0 ? `rgba(0,200,83,${a})` : `rgba(255,61,87,${a})`) : '#11151b';
+    const bg = q && !q.error ? (p >= 0 ? `rgba(42,166,63,${a})` : `rgba(255,61,87,${a})`) : '#11151b';
     return `<div class="heat-cell click" data-sym="${esc(sym)}" style="background:${bg}">
       <div class="hc-sym">${esc(label)}</div><div class="hc-pct">${q && !q.error ? (p >= 0 ? '+' : '') + fmtNum(p) + '%' : '—'}</div></div>`;
   }).join('')}</div>`;
@@ -1354,13 +1467,13 @@ function compactBoard(rows, byName) {
     const q = byName[sym];
     if (!q || q.error) return `<tr><td class="sym">${esc(label)}</td><td class="num muted" colspan="2">—</td></tr>`;
     return `<tr class="click" data-sym="${esc(sym)}"><td class="sym">${esc(label)}</td>
-      <td class="num">${fmtPrice(q.price)}</td>
+      <td class="num ${q._flash || ''}">${fmtPrice(q.price)}</td>
       <td class="num ${chgClass(q.change)}">${arrow(q.change)}${fmtNum(Math.abs(q.changePct))}%</td></tr>`;
   }).join('')}</table></div>`;
 }
 
 async function showLaunchpad() {
-  state.view = 'LAUNCH'; setActiveTabs('HOME'); markFunc(null);
+  state.view = 'LAUNCH'; setActiveTabs('HOME'); markFunc(null); setTab('LAUNCH Launchpad', 'HOME');
   const P = (title, id, cls = '', body = '<div class="loading">…</div>') =>
     `<div class="lp-panel ${cls}"><div class="lp-head">${title}</div><div class="lp-body pad0" id="${id}">${body}</div></div>`;
   el('view').innerHTML = `<div class="fa-screen">` + fnBar('LAUNCHPAD', 'LAUNCH', 'LAUNCH') + `<div class="lp-grid">
@@ -1384,6 +1497,7 @@ async function showLaunchpad() {
     <div class="lp-panel"><div class="lp-head">US YIELD CURVE</div><div class="lp-body"><div class="lp-wrap-canvas"><canvas id="lp-curve" class="lp-canvas"></canvas></div></div></div>
   </div></div>`;
   renderLpClocks();
+  setTimeout(showToast, 2500);
   api('/api/weather').then((w) => { lpWeather = w; renderLpClocks(); }).catch(() => {});
 
   const idx = [['^GSPC', 'S&P 500'], ['^IXIC', 'Nasdaq'], ['^DJI', 'Dow'], ['^RUT', 'Russell 2K'], ['^VIX', 'VIX'], ['^TNX', 'US 10Y'], ['^FTSE', 'FTSE'], ['^N225', 'Nikkei']];
@@ -1452,11 +1566,14 @@ async function showLaunchpad() {
     const up = SECTORS.filter(([s]) => (bn[s]?.changePct || 0) > 0).length;
     const dn = SECTORS.length - up;
     const upPct = (up / SECTORS.length) * 100;
-    setLp('lp-breadth', `<div style="padding:6px 8px;font-family:var(--font-data)">
-      <div style="display:flex;justify-content:space-between;font-size:13px"><span class="pos">▲ ${up} Advancing</span><span class="neg">${dn} Declining ▼</span></div>
-      <div style="height:14px;background:var(--red-down);margin:6px 0;display:flex"><div style="height:100%;background:var(--green);width:${upPct}%"></div></div>
-      <div class="muted" style="font-size:11px">GICS sectors · ${fmtNum(upPct, 0)}% advancing</div>
-      <div style="margin-top:6px;font-size:12px" class="muted">Breadth ${up >= dn ? '<span class="pos">POSITIVE</span>' : '<span class="neg">NEGATIVE</span>'}</div></div>`);
+    setLp('lp-breadth', `<div style="padding:4px 8px;font-family:var(--font-data);display:flex;gap:10px;align-items:center">
+      <canvas id="lp-donut" style="width:64px;height:64px;flex-shrink:0"></canvas>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between;font-size:12px"><span class="pos">▲ ${up} Adv</span><span class="neg">${dn} Dec ▼</span></div>
+        <div style="height:12px;background:var(--red-down);margin:4px 0;display:flex"><div style="height:100%;background:var(--green-fill);width:${upPct}%"></div></div>
+        <div class="muted" style="font-size:11px">GICS · ${fmtNum(upPct, 0)}% advancing · Breadth ${up >= dn ? '<span class="pos">POSITIVE</span>' : '<span class="neg">NEGATIVE</span>'}</div>
+      </div></div>`);
+    setTimeout(() => drawDonut(el('lp-donut'), [{ v: up, color: '#2aa63f' }, { v: dn, color: '#ff3d57' }]), 30);
   }).catch(() => {});
 
   api('/api/history/%5EGSPC?range=1d').then((d) => {
@@ -1478,10 +1595,368 @@ async function showLaunchpad() {
   }).catch(() => {});
 }
 
+
+/* ============================ NEW FUNCTIONS ============================ */
+
+/* ---- ANR: analyst recommendations */
+const GRADE_COLORS = { strongBuy: '#1a7a2e', buy: '#2aa63f', hold: '#f6a313', sell: '#d8622a', strongSell: '#ff3d57' };
+
+async function showANR() {
+  if (!state.symbol) { msg('Load a security first', true); return; }
+  setActiveTabs(null); markFunc('ANR');
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('ANALYST RECOMMENDATIONS', 'ANR', eqBox()) + `<div class="mon-grid cols-2 tfill">
+    <div class="section">${secBar('CONSENSUS')}<div class="sec-body" id="anr-c"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('RECOMMENDATION TREND')}<div class="sec-body" id="anr-t"><div class="loading">…</div></div></div>
+    <div class="section span2">${secBar('RATING CHANGES & PRICE-TARGET ACTIONS')}<div class="sec-body pad0" id="anr-h"><div class="loading">…</div></div></div>
+  </div></div>`;
+  try {
+    const a = await api(`/api/analyst/${encodeURIComponent(state.symbol)}`);
+    const q = state.quote || {};
+    const recCls = /buy/i.test(a.recommendationKey) ? 'rec-buy' : /sell|under/i.test(a.recommendationKey) ? 'rec-sell' : 'rec-hold';
+    const row = (k, v, cls = '') => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${cls}">${v}</span></div>`;
+    el('anr-c').innerHTML = `
+      <div style="margin:2px 0 4px"><span class="rec-badge ${recCls}">${esc((a.recommendationKey || 'N/A').toUpperCase())}</span>
+      <span class="muted" style="margin-left:8px">score ${fmtRatio(a.recommendationMean)}/5 · 1 = Strong Buy</span></div>
+      <div class="kv-grid" style="grid-template-columns:1fr">
+        ${row('Mean Price Target', fmtPrice(a.targetMean), 'hl')}
+        ${row('High / Low Target', `${fmtPrice(a.targetHigh)} / ${fmtPrice(a.targetLow)}`)}
+        ${row('Upside to Mean', a.targetMean && q.price ? `<span class="${chgClass(a.targetMean - q.price)}">${fmtPct(((a.targetMean - q.price) / q.price) * 100)}</span>` : '—')}
+        ${row('# Analysts', fmtRatio(a.numberOfAnalysts, 0))}
+      </div>`;
+    const periods = { '0m': 'Current', '-1m': '1 Mo Ago', '-2m': '2 Mo Ago', '-3m': '3 Mo Ago' };
+    el('anr-t').innerHTML = (a.trend || []).map((t) => {
+      const total = (t.strongBuy || 0) + (t.buy || 0) + (t.hold || 0) + (t.sell || 0) + (t.strongSell || 0) || 1;
+      const seg = (n, key) => (n ? `<div title="${key} ${n}" style="width:${(n / total) * 100}%;background:${GRADE_COLORS[key]};display:flex;align-items:center;justify-content:center;color:#000;font-size:10px">${n}</div>` : '');
+      return `<div style="margin:3px 0">
+        <div class="muted" style="font-size:10px">${esc(periods[t.period] || t.period)} · ${total} analysts</div>
+        <div style="display:flex;height:16px;border:1px solid var(--grid)">${seg(t.strongBuy, 'strongBuy')}${seg(t.buy, 'buy')}${seg(t.hold, 'hold')}${seg(t.sell, 'sell')}${seg(t.strongSell, 'strongSell')}</div>
+      </div>`;
+    }).join('') + `<div class="muted" style="font-size:10px;margin-top:4px">
+      <span style="color:${GRADE_COLORS.strongBuy}">▉</span> Str Buy <span style="color:${GRADE_COLORS.buy}">▉</span> Buy
+      <span style="color:${GRADE_COLORS.hold}">▉</span> Hold <span style="color:${GRADE_COLORS.sell}">▉</span> Sell
+      <span style="color:${GRADE_COLORS.strongSell}">▉</span> Str Sell</div>`;
+    const actCls = (act) => (act === 'up' ? 'pos' : act === 'down' ? 'neg' : act === 'init' ? 'blue' : 'muted');
+    const actLbl = { up: 'UPGRADE', down: 'DOWNGRADE', init: 'INITIATE', main: 'MAINTAIN', reit: 'REITERATE' };
+    el('anr-h').innerHTML = `<div class="tbl-wrap"><table class="data">
+      <tr><th>DATE</th><th>FIRM</th><th>ACTION</th><th>FROM</th><th>TO</th><th class="num">PT</th><th class="num">PRIOR PT</th></tr>
+      ${(a.history || []).map((h) => `<tr>
+        <td class="muted">${fmtDate(h.time)}</td><td class="hl">${esc(h.firm)}</td>
+        <td class="${actCls(h.action)}">${esc(actLbl[h.action] || (h.action || '').toUpperCase())}</td>
+        <td class="muted">${esc(h.fromGrade || '—')}</td><td class="est-i">${esc(h.toGrade || '—')}</td>
+        <td class="num">${h.target ? fmtPrice(h.target) : '—'}</td>
+        <td class="num muted">${h.priorTarget ? fmtPrice(h.priorTarget) : '—'}</td>
+      </tr>`).join('')}
+    </table></div>`;
+  } catch (err) { el('view').querySelector('.mon-grid').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+}
+
+/* ---- HDS: holders */
+async function showHDS() {
+  if (!state.symbol) { msg('Load a security first', true); return; }
+  setActiveTabs(null); markFunc('HDS');
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('SECURITY OWNERSHIP', 'HDS', eqBox()) + `<div class="mon-grid cols-2 tfill">
+    <div class="section">${secBar('OWNERSHIP BREAKDOWN')}<div class="sec-body" id="hds-b"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('INSIDER HOLDERS')}<div class="sec-body pad0" id="hds-i"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('TOP INSTITUTIONAL HOLDERS')}<div class="sec-body pad0" id="hds-inst"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('TOP FUND HOLDERS')}<div class="sec-body pad0" id="hds-f"><div class="loading">…</div></div></div>
+  </div></div>`;
+  try {
+    const h = await api(`/api/holders/${encodeURIComponent(state.symbol)}`);
+    const row = (k, v, cls = '') => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${cls}">${v}</span></div>`;
+    el('hds-b').innerHTML = `<div class="kv-grid" style="grid-template-columns:1fr">
+      ${row('% Held by Insiders', h.breakdown.insidersPct != null ? fmtPct(h.breakdown.insidersPct * 100) : '—', 'hl')}
+      ${row('% Held by Institutions', h.breakdown.institutionsPct != null ? fmtPct(h.breakdown.institutionsPct * 100) : '—', 'hl')}
+      ${row('% of Float (Institutions)', h.breakdown.institutionsFloatPct != null ? fmtPct(h.breakdown.institutionsFloatPct * 100) : '—')}
+      ${row('# Institutions', fmtRatio(h.breakdown.institutionsCount, 0))}
+    </div>`;
+    const ownTable = (list) => `<div class="tbl-wrap"><table class="data">
+      <tr><th>HOLDER</th><th class="num">SHARES</th><th class="num">%HELD</th><th class="num">VALUE</th><th class="num">Δ%</th><th>AS OF</th></tr>
+      ${(list || []).map((o) => `<tr>
+        <td class="hl">${esc(o.name)}</td><td class="num">${fmtBig(o.position)}</td>
+        <td class="num">${o.pctHeld != null ? fmtPct(o.pctHeld * 100) : '—'}</td>
+        <td class="num">${fmtBig(o.value)}</td>
+        <td class="num ${chgClass(o.pctChange)}">${o.pctChange != null ? fmtPct(o.pctChange * 100) : '—'}</td>
+        <td class="muted">${esc(o.reportDate)}</td>
+      </tr>`).join('')}
+    </table></div>`;
+    el('hds-inst').innerHTML = ownTable(h.institutions);
+    el('hds-f').innerHTML = ownTable(h.funds);
+    el('hds-i').innerHTML = `<div class="tbl-wrap"><table class="data">
+      <tr><th>NAME</th><th>RELATION</th><th class="num">SHARES</th><th>LATEST TRANSACTION</th><th>DATE</th></tr>
+      ${(h.insiders || []).map((o) => `<tr>
+        <td class="hl">${esc(o.name)}</td><td class="muted">${esc(o.relation || '')}</td>
+        <td class="num">${fmtBig(o.position)}</td><td class="est-i">${esc(o.latestTrans || '—')}</td><td class="muted">${esc(o.date)}</td>
+      </tr>`).join('')}
+    </table></div>`;
+  } catch (err) { el('view').querySelector('.mon-grid').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+}
+
+/* ---- DVD: dividends */
+async function showDVD() {
+  if (!state.symbol) { msg('Load a security first', true); return; }
+  setActiveTabs(null); markFunc('DVD');
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('DIVIDEND / SPLIT HISTORY', 'DVD', eqBox()) + `<div class="mon-grid cols-2 tfill">
+    <div class="section">${secBar('DIVIDEND SUMMARY')}<div class="sec-body" id="dvd-s"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('PAYMENT TREND')}<div class="sec-body pad0"><div class="mon-chart"><canvas id="dvd-chart"></canvas></div></div></div>
+    <div class="section">${secBar('DIVIDEND PAYMENTS (10Y)')}<div class="sec-body pad0" id="dvd-t"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('STOCK SPLITS')}<div class="sec-body pad0" id="dvd-sp"><div class="loading">…</div></div></div>
+  </div></div>`;
+  try {
+    const d = await api(`/api/dividends/${encodeURIComponent(state.symbol)}`);
+    const divs = d.dividends || [];
+    if (!divs.length) { el('dvd-s').innerHTML = '<div class="muted">No dividends on record for this security.</div>'; el('dvd-t').innerHTML = ''; }
+    else {
+      const ttm = divs.slice(0, 4).reduce((a, x) => a + x.amount, 0);
+      const yield_ = d.price ? (ttm / d.price) * 100 : null;
+      const first = divs[divs.length - 1], last = divs[0];
+      const years = (last.date - first.date) / (365.25 * 86400);
+      const cagr = years > 1 && first.amount > 0 ? (Math.pow(last.amount / first.amount, 1 / years) - 1) * 100 : null;
+      const row = (k, v, cls = '') => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${cls}">${v}</span></div>`;
+      el('dvd-s').innerHTML = `<div class="kv-grid" style="grid-template-columns:1fr">
+        ${row('Last Payment', fmtNum(last.amount, 4), 'hl')}
+        ${row('Last Ex-Date', fmtDate(last.date))}
+        ${row('Trailing 12M Total', fmtNum(ttm, 4))}
+        ${row('Indicated Yield', yield_ != null ? fmtPct(yield_) : '—', 'hl')}
+        ${row('Growth (CAGR since ' + new Date(first.date * 1000).getFullYear() + ')', cagr != null ? `<span class="${chgClass(cagr)}">${fmtPct(cagr)}</span>` : '—')}
+        ${row('Payments on Record', String(divs.length))}
+      </div>`;
+      el('dvd-t').innerHTML = `<div class="tbl-wrap"><table class="data">
+        <tr><th>EX-DATE</th><th class="num">AMOUNT</th><th class="num">Δ vs PRIOR</th></tr>
+        ${divs.map((x, i) => {
+          const prior = divs[i + 1];
+          const chg = prior ? ((x.amount - prior.amount) / prior.amount) * 100 : null;
+          return `<tr><td class="hl">${fmtDate(x.date)}</td><td class="num">${fmtNum(x.amount, 4)}</td>
+            <td class="num ${chg == null ? 'muted' : chgClass(chg)}">${chg == null ? '—' : (chg >= 0 ? '+' : '') + fmtNum(chg, 1) + '%'}</td></tr>`;
+        }).join('')}
+      </table></div>`;
+      setTimeout(() => drawMiniChart('dvd-chart', [...divs].reverse().map((x) => x.amount), '#ffe45c'), 30);
+    }
+    el('dvd-sp').innerHTML = (d.splits || []).length
+      ? `<div class="tbl-wrap"><table class="data"><tr><th>DATE</th><th>RATIO</th></tr>
+        ${d.splits.map((sp) => `<tr><td class="hl">${fmtDate(sp.date)}</td><td class="est-i">${esc(sp.ratio)}</td></tr>`).join('')}</table></div>`
+      : '<div class="muted" style="padding:6px">No splits on record.</div>';
+  } catch (err) { el('view').querySelector('.mon-grid').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+}
+
+/* ---- HP: historical price table */
+async function showHP(range = '3mo') {
+  if (!state.symbol) { msg('Load a security first', true); return; }
+  setActiveTabs(null); markFunc('HP');
+  const tabs = ['1mo', '3mo', '6mo', '1y'].map((r) =>
+    `<button class="tab hp-tab ${r === range ? 'active' : ''}" data-r="${r}">${r.toUpperCase()}</button>`).join('');
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('HISTORICAL PRICE TABLE', 'HP', eqBox())
+    + `<div class="sec-bar" style="position:static">DAILY OHLCV <span class="tabs">${tabs}</span></div>
+    <div id="hp-body" style="flex:1;min-height:0;overflow:auto"><div class="loading">…</div></div></div>`;
+  el('view').querySelectorAll('.hp-tab').forEach((b) => b.addEventListener('click', () => showHP(b.dataset.r)));
+  try {
+    const d = await api(`/api/history/${encodeURIComponent(state.symbol)}?range=${range}`);
+    const c = [...(d.candles || [])].reverse();
+    el('hp-body').innerHTML = `<div class="tbl-wrap"><table class="data">
+      <tr><th>DATE</th><th class="num">OPEN</th><th class="num">HIGH</th><th class="num">LOW</th><th class="num">CLOSE</th><th class="num">%CHG</th><th class="num">VOLUME</th></tr>
+      ${c.map((x, i) => {
+        const prior = c[i + 1];
+        const chg = prior ? ((x.c - prior.c) / prior.c) * 100 : null;
+        return `<tr><td class="hl">${fmtDate(x.t)}</td>
+          <td class="num">${fmtPrice(x.o)}</td><td class="num">${fmtPrice(x.h)}</td>
+          <td class="num">${fmtPrice(x.l)}</td><td class="num est-i">${fmtPrice(x.c)}</td>
+          <td class="num ${chg == null ? 'muted' : chgClass(chg)}">${chg == null ? '—' : (chg >= 0 ? '+' : '') + fmtNum(chg) + '%'}</td>
+          <td class="num muted">${fmtBig(x.v)}</td></tr>`;
+      }).join('')}
+    </table></div>`;
+  } catch (err) { el('hp-body').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+}
+
+/* ---- BQ: composite quote */
+async function showBQ() {
+  if (!state.symbol) { msg('Load a security first', true); return; }
+  setActiveTabs(null); markFunc('BQ');
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('COMPOSITE QUOTE', 'BQ', eqBox()) + `<div class="mon-grid cols-3 tfill">
+    <div class="section">${secBar('LAST TRADE')}<div class="sec-body" id="bq-p"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('BID / ASK')}<div class="sec-body" id="bq-ba"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('RANGES')}<div class="sec-body" id="bq-r"><div class="loading">…</div></div></div>
+    <div class="section span2">${secBar('INTRADAY')}<div class="sec-body pad0"><div class="mon-chart"><canvas id="bq-chart"></canvas></div></div></div>
+    <div class="section">${secBar('TRADE DATA')}<div class="sec-body" id="bq-t"><div class="loading">…</div></div></div>
+  </div></div>`;
+  try {
+    const q = state.quote || await api(`/api/quote/${encodeURIComponent(state.symbol)}`);
+    const rangeBar = (lo, hi, cur) => {
+      if (lo == null || hi == null || cur == null || hi <= lo) return '<div class="muted">—</div>';
+      const p = ((cur - lo) / (hi - lo)) * 100;
+      return `<div style="position:relative;height:14px;background:var(--panel-2);border:1px solid var(--grid);margin:3px 0">
+        <div style="position:absolute;top:-1px;bottom:-1px;left:${p}%;width:2px;background:var(--yellow)"></div></div>
+        <div style="display:flex;justify-content:space-between;font-size:10px" class="muted"><span>${fmtPrice(lo)}</span><span class="hl">${fmtPrice(cur)}</span><span>${fmtPrice(hi)}</span></div>`;
+    };
+    el('bq-p').innerHTML = `
+      <div class="${chgClass(q.change)}" style="font-size:38px;font-weight:bold;line-height:1">${fmtPrice(q.price)}</div>
+      <div class="${chgClass(q.change)}" style="font-size:16px">${fmtChange(q.change, q.changePct)}</div>
+      <div class="muted" style="font-size:11px;margin-top:4px">${esc(q.exchange || '')} · ${esc(q.currency || '')} · ${q.marketTime ? new Date(q.marketTime * 1000).toLocaleString() : ''}</div>`;
+    el('bq-r').innerHTML = `
+      <div class="muted" style="font-size:10px">DAY RANGE</div>${rangeBar(q.dayLow, q.dayHigh, q.price)}
+      <div class="muted" style="font-size:10px;margin-top:8px">52-WEEK RANGE</div>${rangeBar(q.low52w, q.high52w, q.price)}`;
+    const row = (k, v, cls = '') => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${cls}">${v}</span></div>`;
+    el('bq-t').innerHTML = `<div class="kv-grid" style="grid-template-columns:1fr">
+      ${row('Open', fmtPrice(q.open))}${row('Prev Close', fmtPrice(q.prevClose))}
+      ${row('Volume', fmtBig(q.volume), 'hl')}
+      ${row('Value Traded', q.price && q.volume ? fmtBig(q.price * q.volume) : '—')}
+    </div>`;
+    api(`/api/summary/${encodeURIComponent(state.symbol)}`).then((sm) => {
+      el('bq-ba').innerHTML = `
+        <div style="display:flex;gap:12px;align-items:baseline">
+          <div><div class="muted" style="font-size:10px">BID</div><div class="pos" style="font-size:24px;font-weight:bold">${fmtPrice(sm.bid)}</div><div class="muted">x${fmtRatio(sm.bidSize, 0)}</div></div>
+          <div><div class="muted" style="font-size:10px">ASK</div><div class="neg" style="font-size:24px;font-weight:bold">${fmtPrice(sm.ask)}</div><div class="muted">x${fmtRatio(sm.askSize, 0)}</div></div>
+        </div>
+        <div class="kv-grid" style="grid-template-columns:1fr;margin-top:4px">
+          ${row('Spread', sm.bid && sm.ask ? fmtNum(sm.ask - sm.bid, 2) : '—')}
+          ${row('Avg Volume', fmtBig(sm.avgVolume))}
+          ${row('Market Cap', fmtBig(sm.marketCap), 'hl')}
+          ${row('Beta', fmtRatio(sm.beta))}
+        </div>`;
+    }).catch(() => { el('bq-ba').innerHTML = '<div class="muted">bid/ask unavailable</div>'; });
+    loadMonChart('bq-chart', state.symbol);
+  } catch (err) { el('view').querySelector('.mon-grid').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+}
+
+/* ---- EQS: equity screener */
+async function showEQS(scr = 'ugrowth') {
+  state.view = 'EQS'; setActiveTabs(null); markFunc(null); setTab('EQS Screener', 'EQS');
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('EQUITY SCREENER', 'EQS', 'EQS Screening')
+    + `<div class="fa-tabs" id="eqs-tabs"></div>
+    <div id="eqs-body" style="flex:1;min-height:0;overflow:auto"><div class="loading">…</div></div></div>`;
+  try {
+    const d = await api(`/api/screener?scr=${encodeURIComponent(scr)}`);
+    el('eqs-tabs').innerHTML = (d.screens || []).map(([k, t], i) =>
+      `<button class="fa-tab ${k === d.key ? 'active' : ''}" data-scr="${k}"><span class="n">${i + 1})</span>${esc(t.toUpperCase())}</button>`).join('');
+    el('eqs-tabs').querySelectorAll('.fa-tab').forEach((b) => b.addEventListener('click', () => showEQS(b.dataset.scr)));
+    el('eqs-body').innerHTML = `<div class="tbl-wrap"><table class="data">
+      <tr><th>#</th><th>SYM</th><th>NAME</th><th class="num">LAST</th><th class="num">CHG</th><th class="num">CHG%</th><th>1D</th><th class="num">VOLUME</th><th class="num">MKT CAP</th></tr>
+      ${(d.rows || []).map((r, i) => `<tr class="click" data-sym="${esc(r.symbol)}">
+        <td class="muted">${i + 1}</td><td class="sym">${esc(r.symbol)}</td><td class="muted">${esc((r.name || '').slice(0, 28))}</td>
+        <td class="num">${fmtPrice(r.price)}</td>
+        <td class="num ${chgClass(r.change)}">${arrow(r.change)} ${fmtNum(Math.abs(r.change))}</td>
+        <td class="num ${chgClass(r.change)}">${fmtNum(Math.abs(r.changePct))}%</td>
+        <td class="spark-td">${sparkCell(r.symbol)}</td>
+        <td class="num">${fmtBig(r.volume)}</td><td class="num">${fmtBig(r.marketCap)}</td>
+      </tr>`).join('')}
+    </table></div>`;
+    wireRows(el('eqs-body'));
+  } catch (err) { el('eqs-body').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+}
+
+/* ---- BTMM: treasury & money markets composite */
+async function showBTMM() {
+  state.view = 'BTMM'; setActiveTabs(null); markFunc(null); setTab('BTMM Money Mkts', 'BTMM');
+  const YIELDS = [['^IRX', 'US 3-Month Bill'], ['^FVX', 'US 5-Year'], ['^TNX', 'US 10-Year'], ['^TYX', 'US 30-Year']];
+  const FXM = [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['USDJPY=X', 'USD/JPY'], ['DX-Y.NYB', 'Dollar Idx']];
+  const IFUT = [['ES=F', 'S&P Fut'], ['NQ=F', 'Nasdaq Fut'], ['YM=F', 'Dow Fut'], ['GC=F', 'Gold Fut'], ['CL=F', 'Crude Fut']];
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('US TREASURY & MONEY MARKETS', 'BTMM', 'BTMM Monitor') + `<div class="mon-grid cols-3 tfill">
+    <div class="section">${secBar('GOVT YIELDS (%)')}<div class="sec-body pad0" id="bt-y"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('TREASURY FUTURES')}<div class="sec-body pad0" id="bt-tf"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('KEY SPREADS (bp)')}<div class="sec-body" id="bt-sp"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('FX')}<div class="sec-body pad0" id="bt-fx"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('INDEX / CMDTY FUTURES')}<div class="sec-body pad0" id="bt-if"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('US YIELD CURVE')}<div class="sec-body pad0"><div class="mon-chart"><canvas id="bt-curve"></canvas></div></div></div>
+  </div></div>`;
+  try {
+    const byName = await quoteBoard([...YIELDS, ...RATE_FUT, ...FXM, ...IFUT].map((r) => r[0]));
+    const put = (id, rows) => { const e = el(id); if (e) { e.innerHTML = compactBoard(rows, byName); wireRows(e); } };
+    put('bt-y', YIELDS); put('bt-tf', RATE_FUT); put('bt-fx', FXM); put('bt-if', IFUT);
+    const g = (sy) => byName[sy]?.price;
+    const bp = (a, b) => (a != null && b != null ? Math.round((a - b) * 100) : null);
+    const sp = (k, v) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v ${v > 0 ? 'pos' : v < 0 ? 'neg' : ''}">${v == null ? '—' : (v > 0 ? '+' : '') + v + ' bp'}</span></div>`;
+    el('bt-sp').innerHTML = `<div class="kv-grid" style="grid-template-columns:1fr">
+      ${sp('10Y − 3M', bp(g('^TNX'), g('^IRX')))}${sp('10Y − 5Y', bp(g('^TNX'), g('^FVX')))}
+      ${sp('30Y − 10Y', bp(g('^TYX'), g('^TNX')))}
+      <div class="kv"><span class="k">Curve Shape</span><span class="v ${bp(g('^TNX'), g('^IRX')) >= 0 ? 'pos' : 'neg'}">${bp(g('^TNX'), g('^IRX')) >= 0 ? 'NORMAL' : 'INVERTED'}</span></div>
+    </div>`;
+    drawMiniChart('bt-curve', [g('^IRX'), g('^FVX'), g('^TNX'), g('^TYX')].filter((v) => v != null), '#ffe45c');
+  } catch (err) { el('view').querySelector('.mon-grid').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+}
+
+/* ---- GMM: global macro movers */
+async function showGMM() {
+  state.view = 'GMM'; setActiveTabs(null); markFunc(null); setTab('GMM Macro Movers', 'GMM');
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('GLOBAL MACRO MOVERS', 'GMM', 'GMM Monitor') + `<div class="mon-grid cols-2">
+    <div class="section">${secBar('BIGGEST GAINS — GLOBAL CROSS-ASSET')}<div class="sec-body pad0" id="gmm-up"><div class="loading">…</div></div></div>
+    <div class="section">${secBar('BIGGEST DECLINES — GLOBAL CROSS-ASSET')}<div class="sec-body pad0" id="gmm-dn"><div class="loading">…</div></div></div>
+  </div></div>`;
+  const UNIVERSE = [];
+  Object.entries(WEI_REGIONS).forEach(([region, rows]) => rows.forEach(([sy, nm]) => UNIVERSE.push([sy, nm, 'Index'])));
+  [['EURUSD=X', 'EUR/USD'], ['GBPUSD=X', 'GBP/USD'], ['USDJPY=X', 'USD/JPY'], ['USDCNY=X', 'USD/CNY'], ['DX-Y.NYB', 'Dollar Idx']].forEach(([sy, nm]) => UNIVERSE.push([sy, nm, 'Curncy']));
+  [['GC=F', 'Gold'], ['SI=F', 'Silver'], ['CL=F', 'WTI'], ['BZ=F', 'Brent'], ['NG=F', 'Nat Gas'], ['HG=F', 'Copper'], ['ZC=F', 'Corn'], ['ZW=F', 'Wheat']].forEach(([sy, nm]) => UNIVERSE.push([sy, nm, 'Comdty']));
+  [['BTC-USD', 'Bitcoin'], ['ETH-USD', 'Ethereum']].forEach(([sy, nm]) => UNIVERSE.push([sy, nm, 'Crypto']));
+  try {
+    const byName = await quoteBoard(UNIVERSE.map((r) => r[0]));
+    const rows = UNIVERSE
+      .map(([sy, nm, cls]) => ({ sy, nm, cls, q: byName[sy] }))
+      .filter((r) => r.q && !r.q.error && r.q.changePct != null)
+      .sort((a, b) => b.q.changePct - a.q.changePct);
+    const tbl = (list) => `<div class="tbl-wrap"><table class="data">
+      <tr><th>NAME</th><th>CLASS</th><th class="num">LAST</th><th class="num">CHG%</th></tr>
+      ${list.map((r) => `<tr class="click" data-sym="${esc(r.sy)}">
+        <td class="sym">${esc(r.nm)}</td><td><span class="ac-key">${esc(r.cls)}</span></td>
+        <td class="num">${fmtPrice(r.q.price)}</td>
+        <td class="num ${chgClass(r.q.change)}">${arrow(r.q.change)} ${fmtNum(Math.abs(r.q.changePct))}%</td>
+      </tr>`).join('')}
+    </table></div>`;
+    el('gmm-up').innerHTML = tbl(rows.slice(0, 18));
+    el('gmm-dn').innerHTML = tbl([...rows].reverse().slice(0, 18));
+    wireRows(el('gmm-up')); wireRows(el('gmm-dn'));
+  } catch (err) { el('view').querySelector('.mon-grid').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+}
+
+/* ---- NI: news by topic */
+async function showNI(topic) {
+  state.view = 'NI'; setActiveTabs(null); markFunc(null); setTab(`NI ${topic}`.slice(0, 22), `NI ${topic}`);
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar(`NEWS — ${topic.toUpperCase()}`, 'NI', 'NI News')
+    + `<div class="sec-body" style="flex:1;overflow:auto" id="ni-body"><div class="loading">…</div></div></div>`;
+  try {
+    const d = await api(`/api/news?q=${encodeURIComponent(topic)}`);
+    el('ni-body').innerHTML = newsHTML(d.items || [], 30);
+  } catch (err) { el('ni-body').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+}
+
+/* ============================ PANL: multi-panel ============================ */
+
+let panlActive = 0;
+function showPanl(nArg) {
+  if (window !== window.top) return msg('PANL unavailable inside a panel', true);
+  const n = parseInt(nArg, 10);
+  const existing = el('panl');
+  if (!n || n <= 1) {
+    if (existing) existing.remove();
+    return msg('Single-panel workspace');
+  }
+  const count = n >= 4 ? 4 : 2;
+  if (existing) existing.remove();
+  const div = document.createElement('div');
+  div.id = 'panl';
+  div.innerHTML = `<div class="panl-bar"><span class="panl-t">MULTI-PANEL WORKSPACE — ${count} PANELS · ACTIVE PANEL HAS THE BLINKING BORDER</span>
+    <span class="panl-btns"><button class="tb-btn" data-p="1">PANL 1</button><button class="tb-btn" data-p="2">PANL 2</button><button class="tb-btn" data-p="4">PANL 4</button><button class="tb-btn" id="panl-cycle">PANEL ⭾</button></span></div>
+    <div class="panl-grid p${count}">${Array.from({ length: count }, (_, i) =>
+      `<div class="panl-cell" data-i="${i}"><span class="panl-num">P${i + 1}</span><iframe src="${location.pathname}" title="Panel ${i + 1}"></iframe></div>`).join('')}</div>`;
+  document.body.appendChild(div);
+  panlActive = 0; updPanlActive();
+  div.querySelectorAll('.panl-btns .tb-btn[data-p]').forEach((b) => b.addEventListener('click', () => showPanl(b.dataset.p)));
+  el('panl-cycle').addEventListener('click', cyclePanel);
+  div.querySelectorAll('.panl-cell').forEach((c) => c.addEventListener('mousedown', () => { panlActive = parseInt(c.dataset.i, 10); updPanlActive(); }));
+  msg(`${count}-panel workspace — PANEL cycles panels, PANL 1 exits`);
+}
+function updPanlActive() {
+  document.querySelectorAll('.panl-cell').forEach((c, i) => c.classList.toggle('active', i === panlActive));
+}
+function cyclePanel() {
+  const cells = document.querySelectorAll('.panl-cell');
+  if (!cells.length) return msg('No panels open — PANL 2 or PANL 4 first', true);
+  panlActive = (panlActive + 1) % cells.length;
+  updPanlActive();
+  const f = cells[panlActive].querySelector('iframe');
+  if (f) f.focus();
+}
+
 /* ---------------------------------------------------------------- HELP */
 
 function showHelp() {
-  state.view = 'HELP'; setActiveTabs(null); markFunc(null);
+  state.view = 'HELP'; setActiveTabs(null); markFunc(null); setTab('HELP Guide', 'HELP');
   el('view').innerHTML = fnBar('TERMINAL GUIDE', 'HELP', 'HELP') + `<div class="help-body">
     <h2>OPENTERM</h2>
     <p>A Bloomberg-style market terminal. Type a command in the amber line and press <span class="ex">GO</span> (Enter). Commands are <b>SECURITY</b> then <b>FUNCTION</b>, just like a Bloomberg &lt;GO&gt; string.</p>
@@ -1509,6 +1984,16 @@ function showHelp() {
       <tr><td>TOP</td><td>Top market news</td></tr>
       <tr><td>W</td><td>Watchlist — <span class="ex">W ADD NVDA</span> / <span class="ex">W DEL NVDA</span></td></tr>
       <tr><td>S apple</td><td>Security finder (search by name or ticker)</td></tr>
+      <tr><td>EQS</td><td>Equity screener — 8 predefined screens</td></tr>
+      <tr><td>GMM</td><td>Global macro movers — cross-asset ranked</td></tr>
+      <tr><td>BTMM</td><td>US treasury & money markets composite</td></tr>
+      <tr><td>NI TECH</td><td>News by topic</td></tr>
+      <tr><td>AAPL ANR / HDS / DVD / HP / BQ</td><td>Analyst recs · holders · dividends · price table · quote</td></tr>
+      <tr><td>VOD LN EQUITY</td><td>Bloomberg grammar — venue + yellow key (LN=London, GY=Xetra, JT=Tokyo…)</td></tr>
+      <tr><td>SPX INDEX · EURUSD CRNCY · GOLD CMDTY</td><td>Yellow-key symbol mapping</td></tr>
+      <tr><td>MENU</td><td>Back to previous screen · ↑/↓ recall commands · HIST history</td></tr>
+      <tr><td>PANL 2 / PANL 4</td><td>Multi-panel workspace · PANEL cycles panels</td></tr>
+      <tr><td>4</td><td>Type a number + GO to open that numbered menu item</td></tr>
       <tr><td>HELP</td><td>This screen</td></tr>
     </table></div>
     <p class="note">Symbols use Yahoo conventions: indices <span class="ex">^GSPC</span>, FX <span class="ex">EURUSD=X</span>, futures <span class="ex">GC=F</span>, crypto <span class="ex">BTC-USD</span>, non-US <span class="ex">BMW.DE</span>, <span class="ex">7203.T</span>.</p>
@@ -1518,21 +2003,102 @@ function showHelp() {
 
 /* ----------------------------------------------------------- commands */
 
-function runCommand(raw) {
-  const input = raw.trim().toUpperCase();
+/* Bloomberg command grammar: TICKER [VENUE] [YELLOW KEY] [FUNCTION] <GO> */
+const VENUES = { US: '', UN: '', UW: '', LN: '.L', GY: '.DE', GR: '.DE', FP: '.PA', IM: '.MI', SM: '.MC', NA: '.AS', SW: '.SW', VX: '.SW', JT: '.T', JP: '.T', HK: '.HK', AU: '.AX', AT: '.AX', CT: '.TO', IN: '.NS', KS: '.KS', TT: '.TW', BZ: '.SA' };
+const YELLOW_KEYS = ['EQUITY', 'INDEX', 'CRNCY', 'CURNCY', 'CMDTY', 'COMDTY', 'GOVT', 'CORP', 'MUNI', 'PFD', 'MMKT'];
+const IDX_ALIAS = { SPX: '^GSPC', INDU: '^DJI', DJI: '^DJI', CCMP: '^IXIC', NDX: '^NDX', RTY: '^RUT', VIX: '^VIX', UKX: '^FTSE', DAX: '^GDAXI', CAC: '^FCHI', SX5E: '^STOXX50E', IBEX: '^IBEX', NKY: '^N225', HSI: '^HSI', AS51: '^AXJO', SENSEX: '^BSESN', NIFTY: '^NSEI', KOSPI: '^KS11', SPTSX: '^GSPTSE', IBOV: '^BVSP', MEXBOL: '^MXX' };
+const CMDTY_ALIAS = { GC: 'GC=F', GOLD: 'GC=F', SI: 'SI=F', SILVER: 'SI=F', CL: 'CL=F', WTI: 'CL=F', CO: 'BZ=F', BRENT: 'BZ=F', NG: 'NG=F', HG: 'HG=F', PL: 'PL=F', PA: 'PA=F', ZC: 'ZC=F', ZW: 'ZW=F', ZS: 'ZS=F', KC: 'KC=F', SB: 'SB=F', CT: 'CT=F', CC: 'CC=F', ES: 'ES=F', NQ: 'NQ=F', YM: 'YM=F' };
+const GOVT_ALIAS = { USGG3M: '^IRX', USGG5YR: '^FVX', USGG10YR: '^TNX', USGG10: '^TNX', USGG30YR: '^TYX' };
+
+function parseSecurityTokens(toks) {
+  let yellow = null;
+  if (toks.length && YELLOW_KEYS.includes(toks[toks.length - 1])) yellow = toks.pop();
+  let venue = null;
+  if (toks.length === 2 && VENUES[toks[1]] !== undefined) venue = toks.pop();
+  const raw = toks.join('');
+  if (!raw) return null;
+  if (yellow === 'INDEX') return IDX_ALIAS[raw] || ('^' + raw);
+  if (yellow === 'CRNCY' || yellow === 'CURNCY') {
+    if (raw === 'DXY' || raw === 'DX') return 'DX-Y.NYB';
+    if (raw.length === 6) return raw + '=X';
+    if (raw.length === 3) return raw === 'USD' ? 'DX-Y.NYB' : raw + 'USD=X';
+    return raw;
+  }
+  if (yellow === 'CMDTY' || yellow === 'COMDTY') return CMDTY_ALIAS[raw] || (raw.includes('=') ? raw : raw + '=F');
+  if (yellow === 'GOVT') return GOVT_ALIAS[raw] || raw;
+  return raw + (venue ? VENUES[venue] : '');
+}
+
+/* navigation stack (MENU = back) + persistent command history */
+const navStack = [];
+const fwdStack = [];
+const cmdHistory = JSON.parse(localStorage.getItem('openterm.hist') || '[]');
+let histIdx = -1;
+function pushHistory(c) {
+  if (!c) return;
+  if (cmdHistory[0] !== c) {
+    cmdHistory.unshift(c);
+    if (cmdHistory.length > 60) cmdHistory.length = 60;
+    localStorage.setItem('openterm.hist', JSON.stringify(cmdHistory));
+  }
+  histIdx = -1;
+}
+
+function runNumbered(n) {
+  if (n === 96 || n === 97 || n === 98) {
+    const b = document.querySelector(`.fn-act[data-act="${n === 96 ? 'actions' : n === 97 ? 'export' : 'settings'}"]`);
+    return b ? b.click() : msg(`No ${n}) action here`, true);
+  }
+  const fa = document.querySelectorAll('.fa-tabs .fa-tab');
+  if (fa.length && n >= 1 && n <= fa.length) return fa[n - 1].click();
+  const sf = document.querySelectorAll('#sec-funcs .sec-func');
+  if (sf.length && n >= 1 && n <= sf.length) return sf[n - 1].click();
+  msg(`No menu item ${n}) on this screen`, true);
+}
+
+function runCommand(raw, opts = {}) {
+  let input = raw.trim().toUpperCase();
   if (!input) return;
   msg('');
-  const [head, ...rest] = input.split(/\s+/);
+  const parts = input.split(/\s+/);
+  while (parts.length && (parts[parts.length - 1] === 'GO' || parts[parts.length - 1] === '<GO>')) parts.pop();
+  if (!parts.length) return;
+  input = parts.join(' ');
+  const [head, ...rest] = parts;
+
+  // MENU acts as back; FWD replays
+  if (head === 'MENU' || head === 'BACK') {
+    if (navStack.length >= 2) { fwdStack.push(navStack.pop()); return runCommand(navStack[navStack.length - 1], { noPush: true }); }
+    return runCommand('HOME', { noPush: true });
+  }
+  if (head === 'FWD' || head === 'FORWARD') {
+    const nxt = fwdStack.pop();
+    return nxt ? runCommand(nxt) : msg('Nothing to go forward to', true);
+  }
+  // pure number = numbered menu item on the current screen
+  if (/^\d{1,3}$/.test(input)) return runNumbered(parseInt(input, 10));
+
+  if (!opts.noPush) {
+    if (navStack[navStack.length - 1] !== input) navStack.push(input);
+    if (navStack.length > 40) navStack.shift();
+    fwdStack.length = 0;
+    pushHistory(input);
+  }
 
   const topLevel = {
     HOME: showLaunchpad, LAUNCH: showLaunchpad, LP: showLaunchpad,
     WEI: showWEI, MOST: showMovers, MOV: showMovers, MOVERS: showMovers,
     CMDTY: showCommodities, COMD: showCommodities, GOVT: showRates, RATES: showRates, YCRV: showRates,
     FX: showFX, WCRS: showFX, CRYP: showCrypto, CRYPTO: showCrypto, TOP: showTopNews,
-    HELP: showHelp, MENU: showHelp, '?': showHelp,
+    EQS: showEQS, SCRN: showEQS, BTMM: showBTMM, GMM: showGMM,
+    HIST: showHist, CMND: showHist,
+    HELP: showHelp, '?': showHelp,
   };
   if (topLevel[head] && !rest.length) return topLevel[head]();
-  if (head === 'MOST' || head === 'MOV' || head === 'MOVERS') return showMovers(rest[0]?.toLowerCase());
+  if (head === 'EQS' && rest.length) return showEQS(rest[0].toLowerCase());
+  if (head === 'NI') return showNI(rest.join(' ') || 'markets');
+  if (head === 'PANL') return showPanl(rest[0]);
+  if (head === 'PANEL') return cyclePanel();
 
   if (head === 'S' || head === 'SECF' || head === 'SEARCH') {
     const q = rest.join(' ');
@@ -1554,15 +2120,33 @@ function runCommand(raw) {
   }
 
   // bare per-security functions act on the loaded security
-  const secFns = ['DES', 'GP', 'GIP', 'FA', 'ERN', 'CN', 'N'];
+  const secFns = ['DES', 'GP', 'GIP', 'FA', 'ERN', 'CN', 'N', 'ANR', 'HDS', 'DVD', 'HP', 'BQ'];
   if (secFns.includes(head) && !rest.length) {
     if (!state.symbol) return msg('Load a security first — e.g. AAPL', true);
     return runFunc(head === 'N' ? 'CN' : head);
   }
 
-  // SYMBOL [FUNCTION]
-  const fn = secFns.includes(rest[0]) ? (rest[0] === 'N' ? 'CN' : rest[0]) : 'GP';
-  return loadSecurity(head, fn);
+  // SECURITY [VENUE] [YELLOW KEY] [FUNCTION] — full Bloomberg grammar
+  const toks = [...parts];
+  let fn = 'GP';
+  if (toks.length > 1 && secFns.includes(toks[toks.length - 1])) {
+    fn = toks.pop();
+    if (fn === 'N') fn = 'CN';
+  }
+  const symbol = parseSecurityTokens(toks);
+  if (!symbol) return msg('Unrecognized command — HELP <GO>', true);
+  return loadSecurity(symbol, fn);
+}
+
+/* HIST — command history screen */
+function showHist() {
+  state.view = 'HIST'; setActiveTabs(null); markFunc(null); setTab('HIST Cmnd History', 'HIST');
+  el('view').innerHTML = `<div class="fa-screen">` + fnBar('COMMAND HISTORY', 'HIST', 'CMND HISTORY')
+    + `<div class="sec-body" style="flex:1;overflow:auto"><div class="tbl-wrap"><table class="data">
+      <tr><th>#</th><th>COMMAND</th></tr>
+      ${cmdHistory.map((c, i) => `<tr class="click hist-row" data-cmd="${esc(c)}"><td class="muted">${i + 1})</td><td class="hl">${esc(c)}</td></tr>`).join('') || '<tr><td colspan="2" class="muted">No commands yet.</td></tr>'}
+    </table></div></div></div>`;
+  el('view').querySelectorAll('.hist-row').forEach((r) => r.addEventListener('click', () => runCommand(r.dataset.cmd)));
 }
 
 /* ------------------------------------------------------- autocomplete */
@@ -1570,24 +2154,59 @@ function runCommand(raw) {
 let acTimer, acItems = [], acSel = -1;
 const KNOWN = new Set(['HOME', 'WEI', 'MOST', 'MOV', 'MOVERS', 'CMDTY', 'GOVT', 'RATES', 'FX', 'CRYP', 'CRYPTO', 'TOP', 'HELP', 'MENU', 'W', 'WL', 'PORT', 'S', 'SECF', 'DES', 'GP', 'GIP', 'FA', 'ERN', 'CN', 'N']);
 
+const FUNC_DEFS = [
+  ['HOME', 'Launchpad'], ['WEI', 'World Equity Indices'], ['MOST', 'Market Movers'], ['EQS', 'Equity Screener'],
+  ['GMM', 'Global Macro Movers'], ['BTMM', 'Treasury & Money Mkts'], ['CMDTY', 'Commodities'], ['GOVT', 'Rates & Yields'],
+  ['FX', 'Currencies'], ['CRYP', 'Crypto'], ['TOP', 'Top News'], ['NI', 'News by Topic'], ['W', 'Watchlist'],
+  ['HIST', 'Command History'], ['DES', 'Description'], ['GP', 'Price Graph'], ['GIP', 'Intraday'], ['FA', 'Financial Analysis'],
+  ['ERN', 'Earnings'], ['CN', 'Company News'], ['ANR', 'Analyst Recs'], ['HDS', 'Holders'], ['DVD', 'Dividends'],
+  ['HP', 'Historical Prices'], ['BQ', 'Quote'], ['PANL', 'Multi-Panel'], ['HELP', 'Guide'],
+];
+
+function yellowTag(t) {
+  t = (t || '').toLowerCase();
+  if (t.includes('index')) return 'Index';
+  if (t.includes('etf')) return 'Equity';
+  if (t.includes('currency')) return 'Curncy';
+  if (t.includes('future')) return 'Comdty';
+  if (t.includes('crypto')) return 'Crypto';
+  if (t.includes('option')) return 'Option';
+  return 'Equity';
+}
+
 function hideAC() { el('autocomplete').classList.add('hidden'); acItems = []; acSel = -1; }
+function acPick(item) {
+  hideAC(); el('cmd').value = '';
+  if (item.t === 'fn') runCommand(item.code);
+  else loadSecurity(item.symbol, 'GP');
+}
 function renderAC() {
   const box = el('autocomplete');
   if (!acItems.length) return hideAC();
-  box.innerHTML = acItems.map((q, i) => `<div class="ac-row ${i === acSel ? 'sel' : ''}" data-sym="${esc(q.symbol)}">
-    <span class="ac-sym">${esc(q.symbol)}</span><span class="ac-name">${esc(q.name)}</span><span class="ac-exch">${esc(q.exchange || '')}</span></div>`).join('');
+  box.innerHTML = acItems.map((q, i) => (q.t === 'fn'
+    ? `<div class="ac-row ${i === acSel ? 'sel' : ''}" data-i="${i}">
+        <span class="ac-sym blue">${esc(q.code)}</span><span class="ac-name">${esc(q.name)}</span><span class="ac-key fn">Function</span></div>`
+    : `<div class="ac-row ${i === acSel ? 'sel' : ''}" data-i="${i}">
+        <span class="ac-sym">${esc(q.symbol)}</span><span class="ac-name">${esc(q.name)}</span>
+        <span class="ac-exch">${esc(q.exchange || '')}</span><span class="ac-key">${yellowTag(q.type)}</span></div>`)).join('');
   box.classList.remove('hidden');
   box.querySelectorAll('.ac-row').forEach((r) => r.addEventListener('mousedown', (e) => {
-    e.preventDefault(); hideAC(); el('cmd').value = ''; loadSecurity(r.dataset.sym, 'GP');
+    e.preventDefault(); acPick(acItems[parseInt(r.dataset.i, 10)]);
   }));
 }
 function onCmdInput() {
   const v = el('cmd').value.trim();
   clearTimeout(acTimer);
+  histIdx = -1;
   if (!v || /\s/.test(v) || KNOWN.has(v.toUpperCase())) return hideAC();
+  const fns = FUNC_DEFS.filter(([c]) => c.startsWith(v.toUpperCase())).slice(0, 3)
+    .map(([code, name]) => ({ t: 'fn', code, name }));
   acTimer = setTimeout(async () => {
-    try { const d = await api(`/api/search?q=${encodeURIComponent(v)}`); acItems = d.quotes.slice(0, 8); acSel = -1; renderAC(); }
-    catch { hideAC(); }
+    try {
+      const d = await api(`/api/search?q=${encodeURIComponent(v)}`);
+      acItems = [...fns, ...d.quotes.slice(0, 7)];
+      acSel = -1; renderAC();
+    } catch { acItems = fns; acSel = -1; renderAC(); }
   }, 200);
 }
 
@@ -1618,7 +2237,7 @@ async function refreshTape() {
     el('tape').innerHTML = TAPE.map(([sym, label]) => {
       const q = byName[sym]; if (!q || q.error) return '';
       return `<span class="tape-item" data-sym="${esc(sym)}"><span class="t-sym">${esc(label)}</span>
-        <span class="t-px">${fmtPrice(q.price)}</span><span class="${chgClass(q.change)}">${arrow(q.change)}${fmtNum(Math.abs(q.changePct))}%</span></span>`;
+        <span class="t-px ${q._flash || ''}">${fmtPrice(q.price)}</span><span class="${chgClass(q.change)}">${arrow(q.change)}${fmtNum(Math.abs(q.changePct))}%</span></span>`;
     }).join('');
     el('tape').querySelectorAll('.tape-item').forEach((it) => it.addEventListener('click', () => loadSecurity(it.dataset.sym, 'GP')));
   } catch { /* keep previous */ }
@@ -1634,10 +2253,12 @@ async function refreshSecQuote() {
 
 const KEYS = [
   ['HOME', 'Launchpad', 'k-orange'], ['WEI', 'World Idx', 'k-yellow'], ['MOST', 'Movers', 'k-yellow'],
+  ['EQS', 'Screener', 'k-yellow'], ['GMM', 'Macro Mov', 'k-yellow'], ['BTMM', 'Money Mkt', 'k-yellow'],
   ['CMDTY', 'Cmdty', 'k-yellow'], ['GOVT', 'Rates', 'k-yellow'], ['FX', 'FX', 'k-yellow'],
   ['CRYP', 'Crypto', 'k-yellow'], ['TOP', 'News', 'k-blue'], ['DES', 'Desc', 'k-cyan'],
   ['GP', 'Graph', 'k-green'], ['FA', 'Fundmtls', 'k-cyan'], ['ERN', 'Earnings', 'k-cyan'],
-  ['W', 'Watchlist', 'k-orange'], ['HELP', 'Help', 'k-blue'],
+  ['ANR', 'Analyst', 'k-cyan'], ['HDS', 'Holders', 'k-cyan'], ['DVD', 'Dividends', 'k-cyan'],
+  ['W', 'Watchlist', 'k-orange'], ['PANL 4', 'Panels', 'k-red'], ['HELP', 'Help', 'k-blue'],
 ];
 function buildKeybar() {
   el('keybar').innerHTML = KEYS.map(([cmd, label, cls]) =>
@@ -1665,16 +2286,27 @@ function init() {
   document.querySelector('.chr-menu').addEventListener('click', () => runCommand('HELP'));
   document.querySelector('.chr-ic.help').addEventListener('click', () => runCommand('HELP'));
   el('chr-sec').addEventListener('click', () => { if (el('chr-sec').dataset.cmd) loadSecurity(el('chr-sec').dataset.cmd, state.func || 'GP'); });
+  const arrows = document.querySelectorAll('.chr-arrow');
+  if (arrows[0]) arrows[0].addEventListener('click', () => runCommand('MENU'));
+  if (arrows[1]) arrows[1].addEventListener('click', () => runCommand('FWD'));
 
   const cmd = el('cmd');
   cmd.addEventListener('input', onCmdInput);
   cmd.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown' && acItems.length) { e.preventDefault(); acSel = (acSel + 1) % acItems.length; renderAC(); }
     else if (e.key === 'ArrowUp' && acItems.length) { e.preventDefault(); acSel = (acSel - 1 + acItems.length) % acItems.length; renderAC(); }
+    else if (e.key === 'ArrowUp') {  // command history recall
+      e.preventDefault();
+      if (histIdx < cmdHistory.length - 1) { histIdx++; cmd.value = cmdHistory[histIdx] || ''; }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (histIdx > 0) { histIdx--; cmd.value = cmdHistory[histIdx] || ''; }
+      else { histIdx = -1; cmd.value = ''; }
+    }
     else if (e.key === 'Escape') hideAC();
     else if (e.key === 'Enter') {
       e.preventDefault();
-      if (acSel >= 0 && acItems[acSel]) { const s = acItems[acSel].symbol; hideAC(); cmd.value = ''; loadSecurity(s, 'GP'); }
+      if (acSel >= 0 && acItems[acSel]) acPick(acItems[acSel]);
       else { hideAC(); const v = cmd.value; cmd.value = ''; runCommand(v); }
     }
   });
