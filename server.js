@@ -134,6 +134,9 @@ async function yahooChart(symbol, range, interval) {
 
 function quoteFromMeta(meta) {
   const price = meta.regularMarketPrice;
+  // Yahoo returns hollow "YHD" shells for delisted/typo symbols (e.g. APPL):
+  // a result object with no price at all. Reject those instead of rendering 0.00.
+  if (price == null) throw new Error(`no price data for ${meta.symbol || 'symbol'} — it may be delisted or invalid`);
   const prev = meta.chartPreviousClose ?? meta.previousClose ?? price;
   return {
     symbol: meta.symbol,

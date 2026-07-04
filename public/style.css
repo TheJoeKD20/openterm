@@ -511,6 +511,26 @@ table.fin td { border-right: 1px solid var(--grid); }
 .fkey.k-red small { color: #f0aab4; }
 .fkey:hover { filter: brightness(1.18); }
 
+/* -------------------------------------------------- popup menus (Actions / Settings / chart controls) */
+
+.popmenu {
+  position: fixed; z-index: 200; min-width: 190px;
+  background: #0a0e14; border: 1px solid var(--border);
+  box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.55);
+  font-family: var(--font-ui); font-size: 12px; padding: 2px 0;
+}
+.popmenu .pm-head { padding: 3px 10px 4px; color: var(--muted); font-size: 10px; letter-spacing: 0.4px; border-bottom: 1px solid var(--grid); }
+.popmenu .pm-item { padding: 3px 12px 3px 8px; color: var(--white); cursor: pointer; display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+.popmenu .pm-item:hover { background: var(--blue-tab); color: #001; }
+.popmenu .pm-item.dis { color: var(--muted); cursor: default; }
+.popmenu .pm-item.dis:hover { background: transparent; color: var(--muted); }
+.popmenu .pm-check { width: 12px; color: var(--orange); flex-shrink: 0; }
+.popmenu .pm-item:hover .pm-check { color: #001; }
+.popmenu .pm-sep { border-top: 1px solid var(--grid); margin: 2px 0; }
+.fn-ctrl { cursor: pointer; }
+.fn-ctrl:hover { border-color: var(--yellow); }
+#gp-main.noside #gp-side { display: none; }
+
 /* -------------------------------------------------- estimates (ice blue) */
 
 table.fin td.est-i, .est-i, td.est-i { color: #a3c2c2 !important; }

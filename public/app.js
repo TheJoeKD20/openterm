@@ -106,8 +106,14 @@ const state = {
   view: 'home',      // active top-level view
   range: '6mo',
   chartType: 'candle',
-  showMA: true,
+  ma20: true,
+  ma50: true,
+  study: null,       // null | 'boll'
+  evFlags: false,    // dividend/split flags on the chart
+  compare: null,     // overlay symbol on GP
+  chartCur: null,    // re-denomination currency (null = native)
   candles: [],
+  rawCandles: [],    // pre-currency-conversion copy
   watchlist: JSON.parse(localStorage.getItem('openterm.watchlist') || 'null')
     || ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA', 'SPY'],
 };
@@ -219,7 +225,7 @@ async function loadSecurity(symbol, func = 'GP') {
     runFunc(func);
   } catch (err) {
     if (tok !== navSeq) return;
-    msg(`${symbol}: ${err.message}`, true);
+    msg(`${symbol}: ${err.message} — try S ${symbol} to search`, true);
   }
 }
 
@@ -339,6 +345,40 @@ function showToast() {
   setTimeout(close, 20000);
 }
 
+/* ------------------------------------------------ popup menus */
+/* small anchored dropdowns for the chrome controls (Actions, Settings,
+   Mov Avg, Study, Events, Cur…). items: {label, check?, dis?, sep?, onClick} */
+
+let openMenuEl = null;
+function closeMenu() {
+  if (!openMenuEl) return;
+  openMenuEl.remove(); openMenuEl = null;
+  document.removeEventListener('mousedown', menuAway);
+}
+function menuAway(e) { if (openMenuEl && !openMenuEl.contains(e.target)) closeMenu(); }
+function openMenu(anchor, items, title) {
+  if (openMenuEl && openMenuEl.dataset.anchor === (anchor.id || anchor.dataset.act)) return closeMenu(); // toggle
+  closeMenu();
+  const m = document.createElement('div');
+  m.className = 'popmenu';
+  m.dataset.anchor = anchor.id || anchor.dataset.act || '';
+  m.innerHTML = (title ? `<div class="pm-head">${esc(title)}</div>` : '') + items.map((it, i) =>
+    it.sep ? '<div class="pm-sep"></div>'
+      : `<div class="pm-item ${it.dis ? 'dis' : ''}" data-i="${i}">${it.check !== undefined ? `<span class="pm-check">${it.check ? '✓' : ''}</span>` : ''}${esc(it.label)}</div>`).join('');
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect();
+  m.style.left = Math.max(4, Math.min(r.left, innerWidth - m.offsetWidth - 8)) + 'px';
+  m.style.top = Math.min(r.bottom + 2, innerHeight - m.offsetHeight - 8) + 'px';
+  m.querySelectorAll('.pm-item').forEach((row) => row.addEventListener('click', () => {
+    const it = items[parseInt(row.dataset.i, 10)];
+    if (!it || it.dis) return;
+    closeMenu();
+    if (it.onClick) it.onClick();
+  }));
+  openMenuEl = m;
+  setTimeout(() => document.addEventListener('mousedown', menuAway), 0);
+}
+
 function markFunc(code) {
   state.func = code;
   document.querySelectorAll('.sec-func').forEach((b) =>
@@ -392,7 +432,8 @@ async function showChart(range) {
   const tok = ++navSeq;
   if (range) state.range = range;
   setActiveTabs(null); markFunc(state.range === '1d' ? 'GIP' : 'GP');
-  const controls = `<span class="fn-ctrl">Mov Avg ▾</span><span class="fn-ctrl">Study ▾</span><span class="fn-ctrl">Events ▾</span><span class="fn-ctrl"><b>Cur</b> USD ▾</span>`;
+  const curLbl = state.chartCur || (state.quote && state.quote.currency) || 'USD';
+  const controls = `<span class="fn-ctrl" id="gp-ctrl-mav">Mov Avg ▾</span><span class="fn-ctrl" id="gp-ctrl-study">Study ▾</span><span class="fn-ctrl" id="gp-ctrl-ev">Events ▾</span><span class="fn-ctrl" id="gp-ctrl-cur"><b>Cur</b> ${esc(curLbl)} ▾</span>`;
   el('view').innerHTML = `<div class="fa-screen">
     ${fnBar(state.range === '1d' ? 'INTRADAY GRAPH' : 'PRICE GRAPH', state.range === '1d' ? 'GIP' : 'GP', eqBox(), controls)}
     <div id="gp-metabar"><span class="muted">Loading…</span></div>
@@ -404,10 +445,10 @@ async function showChart(range) {
       <button class="tb-btn tbtn" data-type="line">LINE</button>
       <span class="tb-sep"></span>
       <button class="tb-btn mav-btn">MAV</button>
-      <button class="tb-btn dis">COMPARE</button><button class="tb-btn dis">EVENTS</button><button class="tb-btn dis">NEWS</button>
+      <button class="tb-btn cmp-btn ${state.compare ? 'active' : ''}">COMPARE</button><button class="tb-btn ev-btn ${state.evFlags ? 'active' : ''}">EVENTS</button><button class="tb-btn news-btn">NEWS</button>
       <span class="tb-sep"></span>
       <span id="gp-dates"></span>
-      <button class="tb-btn dis" style="margin-left:auto">TABLE</button><button class="tb-btn dis">« CHART CONTENT</button>
+      <button class="tb-btn tbl-btn" style="margin-left:auto">TABLE</button><button class="tb-btn side-btn">« CHART CONTENT</button>
     </div>
     <div id="gp-main">
       <div id="gp-chartcol">
@@ -430,21 +471,36 @@ async function showChart(range) {
     b.addEventListener('click', () => { state.chartType = b.dataset.type; el('view').querySelectorAll('.tbtn').forEach((x) => x.classList.toggle('active', x === b)); drawChart(); });
   });
   const mav = el('view').querySelector('.mav-btn');
-  mav.classList.toggle('active', state.showMA);
-  mav.addEventListener('click', () => { state.showMA = !state.showMA; mav.classList.toggle('active', state.showMA); drawChart(); });
+  const syncMav = () => mav.classList.toggle('active', state.ma20 || state.ma50);
+  syncMav();
+  mav.addEventListener('click', () => { const on = !(state.ma20 || state.ma50); state.ma20 = state.ma50 = on; syncMav(); drawChart(); });
+  wireChartControls(syncMav);
   attachChartEvents();
   try {
     const data = await api(`/api/history/${encodeURIComponent(state.symbol)}?range=${state.range}`);
     if (tok !== navSeq) return;
-    state.candles = data.candles;
+    state.rawCandles = data.candles || [];
+    gpMeta = data.meta;
+    await applyChartCur();
+    if (tok !== navSeq) return;
     hoverIdx = -1;
-    renderGPmeta(data.meta);
-    renderGPside(data.meta);
+    if (!state.candles.length) {
+      const mb = el('gp-metabar'); if (mb) mb.innerHTML = `<span class="neg">No chart data for ${esc(state.symbol)} in this range — the symbol may be delisted or thinly traded.</span>`;
+      const gs = el('gp-side'); if (gs) gs.innerHTML = '<div class="muted" style="padding:8px">No data.</div>';
+      const lg = el('chart-legend'); if (lg) lg.innerHTML = `<span class="neg">No price history available.</span>`;
+    } else {
+      renderGPmeta(data.meta);
+      renderGPside(data.meta);
+    }
     resizeChart();
+    if (state.compare) loadCompare(tok);
+    if (state.evFlags) loadEvFlags(tok);
   } catch (err) {
     if (tok !== navSeq) return;
     msg(`chart: ${err.message}`, true);
     const lg = el('chart-legend'); if (lg) lg.innerHTML = `<span class="neg">${esc(err.message)}</span>`;
+    const mb = el('gp-metabar'); if (mb) mb.innerHTML = `<span class="neg">${esc(err.message)}</span>`;
+    const gs = el('gp-side'); if (gs) gs.innerHTML = '<div class="muted" style="padding:8px">No data.</div>';
   }
   api(`/api/news?symbol=${encodeURIComponent(state.symbol)}`).then((d) => {
     if (tok !== navSeq) return;
@@ -452,6 +508,131 @@ async function showChart(range) {
     e.innerHTML = (d.items || []).slice(0, 6).map((n) =>
       `<span class="gp-ev"><span class="src">${esc((n.source || '').slice(0, 14))}</span> ${esc((n.title || '').slice(0, 70))}</span>`).join('<span class="gp-evsep">•</span>');
   }).catch(() => {});
+}
+
+/* ------------------- chart control dropdowns + overlay data ------------------- */
+
+let gpMeta = null;          // last /api/history meta for re-rendering after cur change
+let compRaw = [];           // comparison overlay candles (raw)
+let evData = { symbol: null, dividends: [], splits: [] };
+const FXCACHE = { rates: null };
+
+const COMPARE_CHOICES = [['SPY', 'SPY — S&P 500 ETF'], ['QQQ', 'QQQ — Nasdaq 100 ETF'], ['DIA', 'DIA — Dow ETF'], ['IWM', 'IWM — Russell 2000 ETF'], ['GC=F', 'GOLD — Comex Gold']];
+const CUR_CHOICES = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD'];
+
+function wireChartControls(syncMav) {
+  const redraw = () => { syncMav(); drawChart(); };
+  const ctrl = (id, fn) => { const e = el(id); if (e) e.addEventListener('click', () => fn(e)); };
+  ctrl('gp-ctrl-mav', (e) => openMenu(e, [
+    { label: 'MA 20', check: state.ma20, onClick: () => { state.ma20 = !state.ma20; redraw(); } },
+    { label: 'MA 50', check: state.ma50, onClick: () => { state.ma50 = !state.ma50; redraw(); } },
+    { sep: true },
+    { label: 'All off', onClick: () => { state.ma20 = state.ma50 = false; redraw(); } },
+  ], 'MOVING AVERAGES'));
+  ctrl('gp-ctrl-study', (e) => openMenu(e, [
+    { label: 'None', check: !state.study, onClick: () => { state.study = null; drawChart(); } },
+    { label: 'Bollinger Bands (20, 2σ)', check: state.study === 'boll', onClick: () => { state.study = 'boll'; drawChart(); } },
+  ], 'STUDIES'));
+  const evToggle = () => {
+    state.evFlags = !state.evFlags;
+    const b = el('view') && el('view').querySelector('.ev-btn'); if (b) b.classList.toggle('active', state.evFlags);
+    if (state.evFlags) loadEvFlags(navSeq); else drawChart();
+  };
+  ctrl('gp-ctrl-ev', (e) => openMenu(e, [
+    { label: 'Dividend & split flags', check: state.evFlags, onClick: evToggle },
+  ], 'CHART EVENTS'));
+  ctrl('gp-ctrl-cur', (e) => {
+    const native = (state.quote && state.quote.currency) || 'USD';
+    const items = [{ label: `${native} (native)`, check: !state.chartCur || state.chartCur === native, onClick: () => setChartCur(null) }];
+    for (const c of CUR_CHOICES) if (c !== native) items.push({ label: c, check: state.chartCur === c, onClick: () => setChartCur(c) });
+    openMenu(e, items, 'PRICE CURRENCY (ECB)');
+  });
+  const btn = (sel, fn) => { const b = el('view').querySelector(sel); if (b) b.addEventListener('click', fn); };
+  btn('.cmp-btn', (ev2) => openMenu(ev2.target.closest('.cmp-btn') || el('view').querySelector('.cmp-btn'), [
+    { label: 'Off', check: !state.compare, onClick: () => { state.compare = null; compRaw = []; const b = el('view').querySelector('.cmp-btn'); if (b) b.classList.remove('active'); drawChart(); } },
+    ...COMPARE_CHOICES.filter(([s]) => s !== state.symbol).map(([s, l]) => ({
+      label: l, check: state.compare === s,
+      onClick: () => { state.compare = s; const b = el('view').querySelector('.cmp-btn'); if (b) b.classList.add('active'); loadCompare(navSeq); },
+    })),
+  ], 'COMPARE (NORMALIZED)'));
+  btn('.ev-btn', evToggle);
+  btn('.news-btn', () => runFunc('CN'));
+  btn('.tbl-btn', () => runFunc('HP'));
+  btn('.side-btn', () => { const gm = el('gp-main'); if (gm) { gm.classList.toggle('noside'); resizeChart(); } });
+}
+
+function setChartCur(cur) {
+  state.chartCur = cur;
+  const native = (state.quote && state.quote.currency) || 'USD';
+  const lbl = el('gp-ctrl-cur'); if (lbl) lbl.innerHTML = `<b>Cur</b> ${esc(cur || native)} ▾`;
+  applyChartCur().then(() => {
+    if (state.candles.length && gpMeta) { renderGPmeta({ ...gpMeta, currency: cur || native }); renderGPside(gpMeta); }
+    drawChart();
+  });
+}
+
+async function ensureFx() {
+  if (FXCACHE.rates) return FXCACHE.rates;
+  const d = await api('/api/fx?base=USD');
+  FXCACHE.rates = Object.fromEntries(d.rates.map((r) => [r.ccy, r.rate]));
+  FXCACHE.rates.USD = 1;
+  return FXCACHE.rates;
+}
+
+// convert the raw candle series into the selected display currency (ECB daily
+// reference rates — a display re-denomination, not a historical FX series)
+async function applyChartCur() {
+  const native = (state.quote && state.quote.currency) || 'USD';
+  const target = state.chartCur;
+  let mul = 1;
+  if (target && target !== native) {
+    try {
+      const rates = await ensureFx();
+      const rF = native === 'USD' ? 1 : rates[native];
+      const rT = target === 'USD' ? 1 : rates[target];
+      if (rF && rT) mul = rT / rF;
+      else msg(`No ECB rate for ${native} → ${target}; showing native`, true);
+    } catch { msg('FX rates unavailable — showing native currency', true); }
+  }
+  state.candles = mul === 1 ? state.rawCandles.slice()
+    : state.rawCandles.map((c) => ({ ...c, o: c.o * mul, h: c.h * mul, l: c.l * mul, c: c.c * mul }));
+}
+
+async function loadCompare(tok) {
+  const sym = state.compare;
+  if (!sym) { compRaw = []; drawChart(); return; }
+  try {
+    const d = await api(`/api/history/${encodeURIComponent(sym)}?range=${state.range}`);
+    if (tok !== navSeq || state.compare !== sym) return;
+    compRaw = d.candles || [];
+    msg(`Comparing ${state.symbol} vs ${sym} (normalized to chart start)`);
+  } catch { if (tok === navSeq) { compRaw = []; msg(`compare ${sym}: unavailable`, true); } }
+  drawChart();
+}
+
+async function loadEvFlags(tok) {
+  if (evData.symbol !== state.symbol) {
+    try {
+      const d = await api(`/api/dividends/${encodeURIComponent(state.symbol)}`);
+      if (tok !== navSeq) return;
+      evData = { symbol: state.symbol, dividends: d.dividends || [], splits: d.splits || [] };
+    } catch { if (tok === navSeq) evData = { symbol: state.symbol, dividends: [], splits: [] }; }
+  }
+  if (!evData.dividends.length && !evData.splits.length) msg('No dividend/split events on record for this security');
+  drawChart();
+}
+
+// rolling Bollinger bands over closes
+function bollinger(candles, period = 20, k = 2) {
+  const mid = movingAvg(candles, period);
+  const up = new Array(candles.length).fill(null), dn = new Array(candles.length).fill(null);
+  for (let i = period - 1; i < candles.length; i++) {
+    const m = mid[i]; let s = 0;
+    for (let j = i - period + 1; j <= i; j++) { const d = candles[j].c - m; s += d * d; }
+    const sd = Math.sqrt(s / period);
+    up[i] = m + k * sd; dn[i] = m - k * sd;
+  }
+  return { up, dn, mid };
 }
 
 function renderGPmeta(meta) {
@@ -563,10 +744,16 @@ function drawChart() {
   ctx.fillRect(M.left, M.top, plotW, priceH);
   const n = candles.length;
   const ma20 = movingAvg(candles, 20), ma50 = movingAvg(candles, 50);
+  const boll = state.study === 'boll' ? bollinger(candles) : null;
+  // comparison overlay: scale so both series share the chart's first close
+  const compScale = state.compare && compRaw.length > 1 && compRaw[0].c ? candles[0].c / compRaw[0].c : null;
 
   let lo = Infinity, hi = -Infinity;
   for (const c of candles) { if (c.l < lo) lo = c.l; if (c.h > hi) hi = c.h; }
-  if (state.showMA) { for (const v of ma20.concat(ma50)) { if (v != null) { if (v < lo) lo = v; if (v > hi) hi = v; } } }
+  if (state.ma20) for (const v of ma20) { if (v != null) { if (v < lo) lo = v; if (v > hi) hi = v; } }
+  if (state.ma50) for (const v of ma50) { if (v != null) { if (v < lo) lo = v; if (v > hi) hi = v; } }
+  if (boll) for (const v of boll.up.concat(boll.dn)) { if (v != null) { if (v < lo) lo = v; if (v > hi) hi = v; } }
+  if (compScale) for (const c of compRaw) { const v = c.c * compScale; if (v < lo) lo = v; if (v > hi) hi = v; }
   const pad = (hi - lo) * 0.05 || hi * 0.01 || 1;
   lo -= pad; hi += pad;
   const xAt = (i) => M.left + ((i + 0.5) / n) * plotW;
@@ -609,14 +796,41 @@ function drawChart() {
       ctx.fillRect(Math.round(xAt(i) - bw / 2), top, bw, bh);
     }
   }
-  // moving averages
-  if (state.showMA) {
-    const drawMA = (arr, color) => {
-      ctx.beginPath(); let started = false;
-      for (let i = 0; i < n; i++) { if (arr[i] == null) continue; const x = xAt(i), y = yAt(arr[i]); started ? ctx.lineTo(x, y) : ctx.moveTo(x, y); started = true; }
-      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.stroke();
+  // overlay line series (moving averages, Bollinger bands)
+  const drawSeries = (arr, color, dash) => {
+    ctx.beginPath(); let started = false;
+    for (let i = 0; i < n; i++) { if (arr[i] == null) continue; const x = xAt(i), y = yAt(arr[i]); started ? ctx.lineTo(x, y) : ctx.moveTo(x, y); started = true; }
+    if (dash) ctx.setLineDash(dash);
+    ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  if (state.ma20) drawSeries(ma20, '#ffe45c');
+  if (state.ma50) drawSeries(ma50, '#4ec8ff');
+  if (boll) { drawSeries(boll.up, '#8794a3', [3, 2]); drawSeries(boll.dn, '#8794a3', [3, 2]); }
+  // comparison overlay (index-proportional x mapping across the plot)
+  if (compScale) {
+    const m = compRaw.length;
+    ctx.beginPath();
+    for (let i = 0; i < m; i++) {
+      const x = M.left + ((i + 0.5) / m) * plotW, y = yAt(compRaw[i].c * compScale);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.strokeStyle = '#ff5fd7'; ctx.lineWidth = 1; ctx.stroke();
+  }
+  // dividend / split flags along the bottom of the plot
+  if (state.evFlags && evData.symbol === state.symbol && n > 1) {
+    const t0 = candles[0].t, t1 = candles[n - 1].t;
+    ctx.textAlign = 'center';
+    const mark = (t, ch, color) => {
+      if (t < t0 || t > t1) return;
+      let a = 0, b = n - 1;
+      while (a < b) { const mid = (a + b) >> 1; candles[mid].t < t ? a = mid + 1 : b = mid; }
+      const x = xAt(a);
+      ctx.fillStyle = color; ctx.fillRect(x - 5, M.top + priceH - 13, 11, 11);
+      ctx.fillStyle = '#000'; ctx.fillText(ch, x + 0.5, M.top + priceH - 7);
     };
-    drawMA(ma20, '#ffe45c'); drawMA(ma50, '#4ec8ff');
+    evData.dividends.forEach((d) => mark(d.date, 'D', '#f6a313'));
+    evData.splits.forEach((s) => mark(s.date, 'S', '#4ec8ff'));
   }
   if (state.quote?.prevClose > lo && state.quote?.prevClose < hi) {
     const y = yAt(state.quote.prevClose);
@@ -641,10 +855,10 @@ function drawChart() {
       lx += 11 + ctx.measureText(label).width + 16;
     };
     item(state.chartType === 'line' || n > 320 ? '#f6a313' : '#e8edf5', `${state.symbol} US Equity (R1) ${fmtPrice(candles[n - 1].c)}`);
-    if (state.showMA) {
-      item('#ffe45c', `MA(20) ${fmtPrice(ma20[n - 1])}`);
-      item('#4ec8ff', `MA(50) ${fmtPrice(ma50[n - 1])}`);
-    }
+    if (state.ma20) item('#ffe45c', `MA(20) ${fmtPrice(ma20[n - 1])}`);
+    if (state.ma50) item('#4ec8ff', `MA(50) ${fmtPrice(ma50[n - 1])}`);
+    if (boll) item('#8794a3', 'BOLL(20,2)');
+    if (compScale) item('#ff5fd7', `${state.compare} (COMP)`);
   }
   if (hoverIdx >= 0 && hoverIdx < n) {
     const c = candles[hoverIdx], x = xAt(hoverIdx), y = yAt(c.c);
@@ -802,12 +1016,12 @@ async function showDES() {
 /* ----------------------------------------------------------------- FA */
 
 const FA_TABS = [['overview', 'OVERVIEW'], ['income', 'INCOME STMT'], ['balance', 'BALANCE SHEET'], ['cashflow', 'CASH FLOW'], ['ratios', 'RATIOS']];
-const faCache = { symbol: null, tab: 'overview', summary: null, fin: null };
+const faCache = { symbol: null, tab: 'overview', summary: null, fin: null, periods: 4 };
 
 function showFA() {
   if (!state.symbol) { msg('Load a security first', true); return; }
   setActiveTabs(null);
-  if (faCache.symbol !== state.symbol) { faCache.symbol = state.symbol; faCache.tab = 'overview'; faCache.summary = null; faCache.fin = null; }
+  if (faCache.symbol !== state.symbol) { faCache.symbol = state.symbol; faCache.tab = 'overview'; faCache.summary = null; faCache.fin = null; faCache.periods = 4; }
   renderFAShell();
   loadFATab();
 }
@@ -815,9 +1029,10 @@ function showFA() {
 const FA_TABS2 = ['11) BBG Adj Highlights', '12) BBG GAAP Highlights', '13) Company Model', '14) Earnings', '15) Enterprise Value', '16) Multiples', '17) Per Share', '18) Stock Value'];
 
 function renderFAShell() {
-  const periods = faCache.fin ? faCache.fin.years.length : 4;
-  const controls = `<span class="fn-ctrl"><b>ASC 842</b> ?</span><span class="fn-ctrl">Adjusted ▾</span>`
-    + `<span class="fn-ctrl"><b>Periods</b> ${periods} Annuals ▾</span><span class="fn-ctrl"><b>Cur</b> USD ▾</span>`;
+  const avail = faCache.fin ? faCache.fin.years.length : 4;
+  const periods = Math.min(faCache.periods || 4, avail);
+  const controls = `<span class="fn-ctrl" id="fa-ctrl-asc"><b>ASC 842</b> ?</span><span class="fn-ctrl" id="fa-ctrl-adj">Adjusted ▾</span>`
+    + `<span class="fn-ctrl" id="fa-ctrl-per"><b>Periods</b> ${periods} Annuals ▾</span><span class="fn-ctrl" id="fa-ctrl-cur"><b>Cur</b> USD ▾</span>`;
   el('view').innerHTML = `<div class="fa-screen">`
     + fnBar('FINANCIAL ANALYSIS', 'FA', eqBox(), controls)
     + `<div class="fa-tabs">${FA_TABS.map(([k, l], i) =>
@@ -827,6 +1042,19 @@ function renderFAShell() {
     + `</div>`;
   el('view').querySelectorAll('.fa-tab').forEach((b) =>
     b.addEventListener('click', () => { faCache.tab = b.dataset.tab; renderFAShell(); loadFATab(); }));
+  const ctrl = (id, fn) => { const e = el(id); if (e) e.addEventListener('click', () => fn(e)); };
+  ctrl('fa-ctrl-asc', () => msg('ASC 842: lease obligations are capitalized in the as-reported filings shown here'));
+  ctrl('fa-ctrl-adj', (e) => openMenu(e, [
+    { label: 'As Reported', check: true },
+    { label: 'Bloomberg Adjusted — needs BBG data', dis: true },
+  ], 'BASIS'));
+  ctrl('fa-ctrl-per', (e) => openMenu(e, [2, 3, 4].map((p2) => ({
+    label: `${p2} Annuals`, check: periods === p2,
+    onClick: () => { faCache.periods = p2; renderFAShell(); loadFATab(); },
+  })), 'PERIODS'));
+  ctrl('fa-ctrl-cur', (e) => openMenu(e, [
+    { label: 'USD (as reported by filer)', check: true },
+  ], 'STATEMENT CURRENCY'));
   setSuggest('<span class="sg-l">Suggested Functions</span><span class="sg-item"><b>ERN</b> Review earnings and estimates</span><span class="sg-item"><b>DVD</b> Track dividend history</span><span class="sg-item"><b>HDS</b> See security ownership</span>');
 }
 
@@ -849,6 +1077,12 @@ async function loadFATab() {
         if (faCache.symbol === sym) faCache.fin = fin;
       }
       if (stale()) return;
+      // honor the Periods control: slice years + all row values in step
+      const p = Math.min(faCache.periods || 4, fin.years.length);
+      if (p < fin.years.length) {
+        const cut = (rows) => rows.map((r) => ({ ...r, values: r.values.slice(0, p) }));
+        fin = { ...fin, years: fin.years.slice(0, p), income: cut(fin.income), balance: cut(fin.balance), cashflow: cut(fin.cashflow) };
+      }
       if (tab === 'ratios') renderFARatios(fin, body);
       else renderStatement(fin, tab, body);
     }
@@ -2331,6 +2565,7 @@ function runNumbered(n) {
 }
 
 function runCommand(raw, opts = {}) {
+  closeMenu();
   let input = raw.trim().toUpperCase();
   if (!input) return;
   msg('');
@@ -2609,8 +2844,12 @@ function init() {
   if (arrows[0]) arrows[0].addEventListener('click', () => runCommand('BACK'));
   if (arrows[1]) arrows[1].addEventListener('click', () => runCommand('FWD'));
 
-  // Escape exits the PANL multi-panel overlay (which otherwise covers #cmd)
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && el('panl')) showPanl(1); });
+  // Escape closes any open dropdown menu, then the PANL overlay
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (openMenuEl) return closeMenu();
+    if (el('panl')) showPanl(1);
+  });
 
   const cmd = el('cmd');
   cmd.addEventListener('input', () => { syncMirror(); onCmdInput(); });
@@ -2640,8 +2879,34 @@ function init() {
   el('view').addEventListener('click', (e) => {
     const btn = e.target.closest('.fn-act');
     if (!btn) return;
-    if (btn.dataset.act === 'export') exportCSV();
-    else showHelp(); // ACTIONS / SETTINGS → command menu
+    if (btn.dataset.act === 'export') return exportCSV();
+    if (btn.dataset.act === 'actions') {
+      return openMenu(btn, [
+        { label: 'Export table as CSV', onClick: exportCSV },
+        { label: 'Print screen', onClick: () => window.print() },
+        {
+          label: 'Copy screen command', onClick: () => {
+            const c = state.currentTabCmd || 'HOME';
+            (navigator.clipboard ? navigator.clipboard.writeText(c) : Promise.reject())
+              .then(() => msg(`Copied "${c}"`)).catch(() => msg(c));
+          },
+        },
+        { label: 'Refresh screen', onClick: () => runCommand(state.currentTabCmd || 'HOME', { noPush: true }) },
+      ], 'ACTIONS');
+    }
+    // 98) SETTINGS
+    const onGP = state.func === 'GP' || state.func === 'GIP';
+    openMenu(btn, [
+      { label: 'Chart: candlesticks', check: state.chartType === 'candle', onClick: () => { state.chartType = 'candle'; onGP ? showChart() : msg('Chart type: candlesticks'); } },
+      { label: 'Chart: line', check: state.chartType === 'line', onClick: () => { state.chartType = 'line'; onGP ? showChart() : msg('Chart type: line'); } },
+      { label: 'Moving averages', check: state.ma20 || state.ma50, onClick: () => { const on = !(state.ma20 || state.ma50); state.ma20 = state.ma50 = on; onGP ? showChart() : msg(`Moving averages ${on ? 'on' : 'off'}`); } },
+      { label: 'PROP film/TV mode', check: prop.on, onClick: () => setProp(prop.on ? 'OFF' : 'ON') },
+      { sep: true },
+      { label: 'Clear command history', onClick: () => { cmdHistory.length = 0; localStorage.setItem('openterm.hist', '[]'); msg('Command history cleared'); } },
+      { label: 'Reset watchlist to defaults', onClick: () => { state.watchlist = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA', 'SPY']; saveWatchlist(); msg('Watchlist reset'); } },
+      { sep: true },
+      { label: 'Terminal guide (HELP)', onClick: () => runCommand('HELP') },
+    ], 'SETTINGS');
   });
 
   window.addEventListener('resize', () => { if (chartEl && el('chart')) resizeChart(); });

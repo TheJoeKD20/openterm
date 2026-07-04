@@ -85,7 +85,10 @@ async function yahooChart(symbol, range, interval) {
   return result;
 }
 function quoteFromMeta(m) {
-  const price = m.regularMarketPrice, prev = m.chartPreviousClose ?? m.previousClose ?? price;
+  const price = m.regularMarketPrice;
+  // hollow "YHD" shells for delisted/typo symbols carry no price — reject them
+  if (price == null) throw new Error(`no price data for ${m.symbol || 'symbol'} — it may be delisted or invalid`);
+  const prev = m.chartPreviousClose ?? m.previousClose ?? price;
   return {
     symbol: m.symbol, name: m.longName || m.shortName || m.symbol, price,
     change: price - prev, changePct: prev ? ((price - prev) / prev) * 100 : 0, prevClose: prev,
